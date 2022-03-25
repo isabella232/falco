@@ -50,12 +50,28 @@ public:
         return &m_rules[id];
     }
 
+    // note: this is never used at runtime, so O(N) is acceptable here
+    virtual falco_rule* get(std::string& name)
+    {
+        auto prev = std::find_if(m_rules.begin(), m_rules.end(),
+            [&name](const falco_rule &r) { return r.name == name; });
+        if (prev != m_rules.end())
+        {
+            return &*prev;
+        }
+        return nullptr;
+    }
+
     virtual inline void clear()
     {
         m_rules.clear();
     }
 
+    virtual inline uint32_t size()
+    {
+        return m_rules.size();
+    }
+
 private:
     std::vector<falco_rule> m_rules;
-
 };

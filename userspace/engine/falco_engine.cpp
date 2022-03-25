@@ -385,7 +385,25 @@ void falco_engine::populate_rule_result(unique_ptr<struct rule_result> &res, gen
 
 void falco_engine::describe_rule(string *rule)
 {
-	// todo: implement this
+	static const char* rule_fmt = "%-50s %s\n";
+	fprintf(stdout, rule_fmt, "Rule", "Description");
+	fprintf(stdout, rule_fmt, "----",  "-----------");
+	if (!rule)
+	{
+		for (uint32_t id = 0; id < m_rule_collection.size(); id++)
+		{
+			auto r = m_rule_collection.get(id);
+			auto wrapped = falco::utils::wrap_text(r->description, 51, 110);
+			fprintf(stdout, rule_fmt, r->name.c_str(), wrapped.c_str());
+		}
+	}
+	else
+	{
+		auto r = m_rule_collection.get(*rule);
+		auto wrapped = falco::utils::wrap_text(r->description, 51, 110);
+		fprintf(stdout, rule_fmt, r->name.c_str(), wrapped.c_str());
+	}
+
 }
 
 // Print statistics on the rules that triggered
