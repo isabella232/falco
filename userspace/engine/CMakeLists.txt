@@ -11,7 +11,6 @@
 # specific language governing permissions and limitations under the License.
 
 set(FALCO_ENGINE_SOURCE_FILES
-    rules.cpp
     falco_common.cpp
     falco_engine.cpp
     falco_utils.cpp

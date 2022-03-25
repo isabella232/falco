@@ -18,6 +18,7 @@ limitations under the License.
 #include "falco_common.h"
 #include <sstream>
 #include <algorithm>
+#include "falco_engine.h"
 
 using namespace std;
 
@@ -57,23 +58,35 @@ std::vector<std::string>& rule_loader::warnings()
     return m_warnings;
 }
 
-void rule_loader::clear()
+uint32_t rule_loader::get_required_engine_version()
 {
-    m_required_plugin_versions.clear();
+    return m_required_engine_version;
 }
 
-bool rule_loader::load(falco_engine* engine, const std::string &rules_content)
+std::map<std::string, std::string>& rule_loader::get_required_plugin_versions()
 {
-    // todo: grab these from parameters
-    m_min_priority = falco_common::priority_type::PRIORITY_DEBUG;
+    return m_required_plugin_versions;
+}
 
-    // todo: which of these is maintained at the next call to load()?
+void rule_loader::clear()
+{
     m_last_id = 0;
-    m_errors.clear();
-    m_warnings.clear();
     m_macros.clear();
     m_lists.clear();
     m_rules.clear();
+    m_required_plugin_versions.clear();
+}
+
+bool rule_loader::load(
+        falco_engine* engine,
+        const std::string &rules_content,
+        falco_common::priority_type min_priority,
+        bool replace_container_info,
+        string fmt_extra)
+{
+    m_min_priority = min_priority;
+    m_errors.clear();
+    m_warnings.clear();
     m_engine = engine;
 
     // load yaml document
@@ -122,7 +135,7 @@ bool rule_loader::load(falco_engine* engine, const std::string &rules_content)
         }
     }
 
-    return true;
+    return compile(m_engine, replace_container_info, fmt_extra);
 }
 
 bool rule_loader::compile(falco_engine* engine, bool replace_container_info, string fmt_extra)
@@ -144,7 +157,7 @@ bool rule_loader::compile(falco_engine* engine, bool replace_container_info, str
             auto ref = find_list(v);
             // note: there is a visibility ordering between lists,
             // which means that lists can only use lists defined before them
-            if (ref && ref->id < l.id_visibility)
+            if (ref && ref->index < l.index_visibility)
             {
                 ref->used = true;
                 new_values.insert(new_values.end(), ref->values.begin(), ref->values.end());
@@ -194,7 +207,7 @@ bool rule_loader::compile(falco_engine* engine, bool replace_container_info, str
         // which means that macros can only use macros defined before them
         for (auto &ref : m_macros)
         {
-            if (ref.id != m.id && ref.id < m.id_visibility)
+            if (ref.index != m.index && ref.index < m.index_visibility)
             {
                 macro_resolver.set_macro(ref.name, ref.condition_ast);
             }
@@ -220,7 +233,6 @@ bool rule_loader::compile(falco_engine* engine, bool replace_container_info, str
     }
 
     // compile all rules and add them to engine
-    uint32_t n_rules = 0;
     for (auto &r: m_rules)
     {
         if (r.skipped)
@@ -277,6 +289,7 @@ bool rule_loader::compile(falco_engine* engine, bool replace_container_info, str
         }
 
         // todo(jasondellaluce): simplify the logic here
+        // todo: place a flag on this so that it's not repeated
         if (r.source == s_syscall_source)
         {
             if (r.output.find(s_container_info_fmt) != string::npos)
@@ -308,24 +321,11 @@ bool rule_loader::compile(falco_engine* engine, bool replace_container_info, str
             return false;
         }
 
-        // compile rule
-        uint32_t rule_id = n_rules++;
-        auto filter = compile_condition(condition_ast.get(), r.source, rule_id, errstr);
-        if (!filter)
+        // add rule to engine
+        if (!collect_rule(r, condition_ast))
         {
-            if (r.skip_if_unknown_filter && errstr.find("nonexistent field") != string::npos)
-            {
-                add_warning("rule '" + r.name +"' warning (unknown-field): " + errstr);
-            }
-            else
-            {
-                add_error("rule '" + r.name +"' error: " + errstr);
-                return false;
-            }
-        }
-        else
-        {
-            collect_rule_filter(r, filter);
+            // an error should already been set here
+            return false;
         }
     }
 
@@ -353,15 +353,15 @@ bool rule_loader::parse_required_engine_version(bool& parsed, const YAML::Node& 
     if (!parsed && item["required_engine_version"].IsDefined())
     {
         parsed = true;
-        uint32_t ver = 0;
-        if (!YAML::convert<uint32_t>::decode(item["required_engine_version"], ver))
+        m_required_engine_version = 0;
+        if (!YAML::convert<uint32_t>::decode(item["required_engine_version"], m_required_engine_version))
         {
             add_error("value of required_engine_version must be a number");
             return false;
         }
-        if (m_engine->engine_version() < ver)
+        if (m_engine->engine_version() < m_required_engine_version)
         {
-            add_error("rules require engine version " + to_string(ver)
+            add_error("rules require engine version " + to_string(m_required_engine_version)
                     + ", but engine version is "
                     + to_string(m_engine->engine_version()));
             return false;
@@ -411,7 +411,7 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
     if (!parsed && item["macro"].IsDefined())
     {
         parsed = true;
-        rule_macro m;
+        macro_info m;
         if (!YAML::convert<string>::decode(item["macro"], m.name)
                 || m.name.empty())
         {
@@ -467,7 +467,7 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
             // todo(jasondellaluce): consider doing AST concatenation in the future
             prev->condition += " ";
             prev->condition += m.condition;
-            prev->id_visibility = m_last_id++;
+            prev->index_visibility = m_last_id++;
             // todo: concatenate YAML context too
         }
         else
@@ -476,12 +476,12 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
             if (prev)
             {
                 prev->condition = m.condition;
-                prev->id_visibility = m_last_id++;
+                prev->index_visibility = m_last_id++;
             }
             else
             {
-                m.id = m_last_id++;
-                m.id_visibility = m.id;
+                m.index = m_last_id++;
+                m.index_visibility = m.index;
                 m.used = false;
                 add_macro(m);
             }
@@ -495,7 +495,7 @@ bool rule_loader::parse_list(bool& parsed, const YAML::Node& item)
     if (!parsed && item["list"].IsDefined())
     {
         parsed = true;
-        rule_list l;
+        list_info l;
         if (!YAML::convert<string>::decode(item["list"], l.name)
                 || l.name.empty())
         {
@@ -537,7 +537,7 @@ bool rule_loader::parse_list(bool& parsed, const YAML::Node& item)
             }
             // todo(jasondellaluce): consider doing AST concatenation in the future
             prev->values.insert(prev->values.end(), l.values.begin(), l.values.end());
-            prev->id_visibility = m_last_id++;
+            prev->index_visibility = m_last_id++;
             // todo: concatenate YAML context too
         }
         else
@@ -545,13 +545,13 @@ bool rule_loader::parse_list(bool& parsed, const YAML::Node& item)
             // store list
             if (prev)
             {
-                prev->id_visibility = m_last_id++;
+                prev->index_visibility = m_last_id++;
                 prev->values = l.values;
             }
             else
             {
-                l.id = m_last_id++;
-                l.id_visibility = l.id;
+                l.index = m_last_id++;
+                l.index_visibility = l.index;
                 l.used = false;
                 add_list(l);
             }
@@ -566,7 +566,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
     if (!parsed && item["rule"].IsDefined())
     {
         parsed = true;
-        rule r;
+        rule_info r;
         if (!YAML::convert<string>::decode(item["rule"], r.name)
                 || r.name.empty())
         {
@@ -649,7 +649,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                 prev->condition += r.condition;
             }
 
-            prev->id_visibility = m_last_id++;
+            prev->index_visibility = m_last_id++;
             // todo: concatenate context too
         }
         else
@@ -725,14 +725,14 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                 // store rule
                 if (prev)
                 {
-                    r.id = prev->id;
-                    r.id_visibility = m_last_id++;
+                    r.index = prev->index;
+                    r.index_visibility = m_last_id++;
                     *prev = r;
                 }
                 else
                 {
-                    r.id = m_last_id++;
-                    r.id_visibility = r.id;
+                    r.index = m_last_id++;
+                    r.index_visibility = r.index;
                     add_rule(r);
                 }
             }
@@ -759,8 +759,8 @@ std::shared_ptr<libsinsp::filter::ast::expr> rule_loader::parse_condition(
 	}
 }
 
-gen_event_filter* rule_loader::compile_condition(
-        libsinsp::filter::ast::expr* condition,
+std::shared_ptr<gen_event_filter> rule_loader::compile_condition(
+        std::shared_ptr<libsinsp::filter::ast::expr> condition,
         string source,
         uint32_t rule_id,
         std::string& errstr)
@@ -768,9 +768,10 @@ gen_event_filter* rule_loader::compile_condition(
     try
     {
         auto factory = m_engine->get_filter_factory(source);
-        sinsp_filter_compiler compiler(factory, condition);
+        sinsp_filter_compiler compiler(factory, condition.get());
         compiler.set_check_id(rule_id);
-        return compiler.compile();
+        std::shared_ptr<gen_event_filter> ret(compiler.compile());
+        return ret;
     }
     catch (const sinsp_exception& e)
     {
@@ -787,7 +788,7 @@ gen_event_filter* rule_loader::compile_condition(
 // For now we need to keep resolving lists by text substitution to avoid
 // introducing breaking changes. This is a 1-1 porting of the function
 // we had in Lua.
-bool rule_loader::resolve_list(std::string& condition, rule_list& list)
+bool rule_loader::resolve_list(std::string& condition, list_info& list)
 {
     static string blanks = " \t\n\r";
     static string delimiters = blanks + "(),=";
@@ -870,26 +871,26 @@ void rule_loader::quote_item(std::string& item)
     }
 }
 
-void rule_loader::add_macro(rule_macro& e)
+void rule_loader::add_macro(macro_info& e)
 {
     m_macros.push_back(e);
 }
 
-void rule_loader::add_list(rule_list& e)
+void rule_loader::add_list(list_info& e)
 {
     m_lists.push_back(e);
 }
 
-void rule_loader::add_rule(rule& e)
+void rule_loader::add_rule(rule_info& e)
 {
     m_rules.push_back(e);
 }
 
-rule_macro* rule_loader::find_macro(const std::string& name)
+rule_loader::macro_info* rule_loader::find_macro(const std::string& name)
 {
     // todo: decide if we want to optimize linear search (maybe not)
     auto prev = std::find_if(m_macros.begin(), m_macros.end(),
-        [&name](const rule_macro &r) { return r.name == name; });
+        [&name](const macro_info &r) { return r.name == name; });
     if (prev != m_macros.end())
     {
         return &*prev;
@@ -897,11 +898,11 @@ rule_macro* rule_loader::find_macro(const std::string& name)
     return nullptr;
 }
 
-rule_list* rule_loader::find_list(const std::string& name)
+rule_loader::list_info* rule_loader::find_list(const std::string& name)
 {
     // todo: decide if we want to optimize linear search (maybe not)
     auto prev = std::find_if(m_lists.begin(), m_lists.end(),
-        [&name](const rule_list &r) { return r.name == name; });
+        [&name](const list_info &r) { return r.name == name; });
     if (prev != m_lists.end())
     {
         return &*prev;
@@ -909,11 +910,11 @@ rule_list* rule_loader::find_list(const std::string& name)
     return nullptr;
 }
 
-rule* rule_loader::find_rule(const std::string& name)
+rule_loader::rule_info* rule_loader::find_rule(const std::string& name)
 {
     // todo: decide if we want to optimize linear search (maybe not)
     auto prev = std::find_if(m_rules.begin(), m_rules.end(),
-        [&name](const rule &r) { return r.name == name; });
+        [&name](const rule_info &r) { return r.name == name; });
     if (prev != m_rules.end())
     {
         return &*prev;
@@ -921,10 +922,27 @@ rule* rule_loader::find_rule(const std::string& name)
     return nullptr;
 }
 
-void rule_loader::collect_rule_filter(rule& rule, gen_event_filter* filter)
+bool rule_loader::collect_rule(rule_info& rule, std::shared_ptr<libsinsp::filter::ast::expr> condition)
 {
-    // todo: implement this engine->add_filter()
-    printf("ADDED RULE: %s\n", rule.name.c_str());
+    string errstr;
+    auto it = std::find_if(m_rules.begin(), m_rules.end(),
+        [&rule](const rule_info &r) { return r.name == rule.name; });
+    uint32_t rule_id = it - m_rules.begin();
+    auto filter = compile_condition(condition, rule.source, rule_id, errstr);
+    if (!filter)
+    {
+        if (rule.skip_if_unknown_filter && errstr.find("nonexistent field") != string::npos)
+        {
+            add_warning("rule '" + rule.name +"' warning (unknown-field): " + errstr);
+            return true;
+        }
+        else
+        {
+            add_error("rule '" + rule.name +"' error: " + errstr);
+            return false;
+        }
+    }
+    m_engine->add_filter(filter, rule.name, rule.source, rule.tags);
     if (rule.source == s_syscall_source)
     {
         auto evttypes = filter->evttypes();
@@ -935,10 +953,8 @@ void rule_loader::collect_rule_filter(rule& rule, gen_event_filter* filter)
                     + "         This has a significant performance penalty.");
         }
     }
-
-    // todo: enable rule in default ruleset engine->enable_rule()
-
-
+    m_engine->enable_rule(rule.name, rule.enabled);
+    return true;
 }
 
 // todo: decide what's passed by reference and what not... in all the methods :)
@@ -955,4 +971,33 @@ bool rule_loader::is_format_valid(std::string src, std::string fmt, std::string&
 		errstr = e.what();
 		return false;
 	}
+}
+
+void rule_loader::describe_rule(std::string rule_name)
+{
+    // todo: implement this
+}
+
+void rule_loader::describe_rules()
+{
+    // todo: implement this
+}
+
+void rule_loader::get_rule_info(
+        uint32_t id,
+        std::string& name,
+        std::string& output,
+        falco_common::priority_type& priority,
+        std::set<std::string>& tags)
+{
+    if (id >= m_rules.size())
+    {
+        throw falco_exception("populate_rule_result error: unknown rule id " + to_string(id));
+    }
+    auto rule = &m_rules[id];
+    name = rule->name;
+    priority = rule->priority;
+    output = rule->output;
+    tags = rule->tags;
+    // res->exception_fields = ... todo: implement exception fields
 }

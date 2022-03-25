@@ -23,48 +23,9 @@ limitations under the License.
 #include <filter/parser.h>
 #include "filter_macro_resolver.h"
 #include "falco_common.h"
-#include "falco_engine.h"
 
-// todo: better naming & namespace
-struct rule
-{
-    uint32_t id;
-    uint32_t id_visibility;
-    std::string name;
-    std::string description;
-    std::string output;
-    std::string condition;
-    std::string source;
-	std::set<std::string> tags;
-    // todo: exceptions
-    falco_common::priority_type priority;
-    bool skip_if_unknown_filter;
-    bool warn_evttypes;
-    bool enabled;
-    bool skipped;
-};
-
-// todo: better naming & namespace
-struct rule_macro
-{
-    uint32_t id;
-    uint32_t id_visibility;
-    std::string name;
-    std::string condition;
-    std::string source;
-    std::shared_ptr<libsinsp::filter::ast::expr> condition_ast;
-    bool used;
-};
-
-// todo: better naming & namespace
-struct rule_list
-{
-    uint32_t id;
-    uint32_t id_visibility;
-    std::string name;
-    std::vector<std::string> values;
-    bool used;
-};
+// todo(jasondellaluce): remove this cyclic dependency in the future
+class falco_engine;
 
 class rule_loader
 {
@@ -73,17 +34,81 @@ public:
 
     // todo: better naming
     // called for each ruleset file
-    bool load(falco_engine* engine, const std::string &rules_content);
+    bool load(
+        falco_engine* engine,
+        const std::string &rules_content,
+        falco_common::priority_type min_priority,
+        bool replace_container_info,
+        string fmt_extra);
 
-    // todo: better naming
-    // called once after all ruleset files are loaded
-    bool compile(falco_engine* engine, bool replace_container_info, string fmt_extra);
+    void describe_rule(std::string rule_name);
+    void describe_rules();
+
+    // todo: move this to a rule_collection class
+    void get_rule_info(
+        uint32_t id,
+        std::string& name,
+        std::string& output,
+        falco_common::priority_type& priority,
+        std::set<std::string>& tags);
     
+    // of last load() call
     std::vector<std::string>& errors();
 
+    // of last load() call
     std::vector<std::string>& warnings();
 
+    // of last load() call
+    uint32_t get_required_engine_version();
+
+    // of last load() call
+    std::map<std::string, std::string>& get_required_plugin_versions();
+
 private:
+    struct macro_info
+    {
+        uint32_t index;
+        uint32_t index_visibility;
+        std::string name;
+        std::string condition;
+        std::string source;
+        std::shared_ptr<libsinsp::filter::ast::expr> condition_ast;
+        bool used;
+    };
+
+    struct list_info
+    {
+        uint32_t index;
+        uint32_t index_visibility;
+        std::string name;
+        std::vector<std::string> values;
+        bool used;
+    };
+
+    struct rule_info
+    {
+        uint32_t index;
+        uint32_t index_visibility;
+        std::string name;
+        std::string description;
+        std::string output;
+        std::string condition;
+        std::string source;
+        std::set<std::string> tags;
+        // todo: exceptions
+        falco_common::priority_type priority;
+        bool skip_if_unknown_filter;
+        bool warn_evttypes;
+        bool enabled;
+        bool skipped;
+    };
+
+    // stores rules in the engine
+    bool compile(
+        falco_engine* engine,
+        bool replace_container_info,
+        string fmt_extra);
+
     // error management helpers
     void add_error(std::string e);
     void add_warning(std::string e);
@@ -99,35 +124,36 @@ private:
     std::shared_ptr<libsinsp::filter::ast::expr> parse_condition(
         std::string condition,
         std::string& errstr);
-    gen_event_filter* compile_condition(
-        libsinsp::filter::ast::expr* condition,
+    std::shared_ptr<gen_event_filter> compile_condition(
+        std::shared_ptr<libsinsp::filter::ast::expr> condition,
         string source,
         uint32_t rule_id,
         std::string& errstr);
     
     // engine helpers
-    void collect_rule_filter(rule& rule, gen_event_filter* filter);
+    bool collect_rule(rule_info& rule, std::shared_ptr<libsinsp::filter::ast::expr> condition);
     bool is_format_valid(std::string src, std::string fmt, std::string& errstr);
 
     // list helpers
     void quote_item(std::string& item);
-    bool resolve_list(std::string& condition, rule_list& list);
+    bool resolve_list(std::string& condition, list_info& list);
 
     // state helpers
-    void add_macro(rule_macro& e);
-    void add_list(rule_list& e);
-    void add_rule(rule& e);
-    rule_macro* find_macro(const std::string& name);
-    rule_list* find_list(const std::string& name);
-    rule* find_rule(const std::string& name);
+    void add_macro(macro_info& e);
+    void add_list(list_info& e);
+    void add_rule(rule_info& e);
+    macro_info* find_macro(const std::string& name);
+    list_info* find_list(const std::string& name);
+    rule_info* find_rule(const std::string& name);
 
     // state variables
     uint32_t m_last_id;
+    uint32_t m_required_engine_version;
     std::vector<std::string> m_errors;
     std::vector<std::string> m_warnings;
-    std::vector<rule_macro> m_macros;
-    std::vector<rule_list> m_lists;
-    std::vector<rule> m_rules;
+    std::vector<macro_info> m_macros;
+    std::vector<list_info> m_lists;
+    std::vector<rule_info> m_rules;
     std::map<std::string, std::string> m_required_plugin_versions;
 
     // used only during method exec

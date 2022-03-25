@@ -148,16 +148,44 @@ void falco_engine::load_rules(const string &rules_content, bool verbose, bool al
 
 void falco_engine::load_rules(const string &rules_content, bool verbose, bool all_events, uint64_t &required_engine_version)
 {
-	// if(!m_rules)
-	// {
-	// 	m_rules.reset(new falco_rules(this));
-	// 	for(auto const &it : m_filter_factories)
-	// 	{
-	// 		// m_rules->add_filter_factory(it.first, it.second);
-	// 	}
-	// }
+	bool success = m_rule_loader.load(this, rules_content, m_min_priority, m_replace_container_info, m_extra);
+	std::ostringstream os;
+	if (m_rule_loader.errors().size() > 0)
+	{
+		os << m_rule_loader.errors().size() << " errors:" << std::endl;
+		for(auto err : m_rule_loader.errors())
+		{
+			os << err << std::endl;
+		}
+	}
+	if (m_rule_loader.warnings().size() > 0)
+	{
+		os << m_rule_loader.warnings().size() << " warnings:" << std::endl;
+		for(auto warn : m_rule_loader.errors())
+		{
+			os << warn << std::endl;
+		}
+	}
+	if(!success)
+	{
+		throw falco_exception(os.str());
+	}
 
-	// m_rules->load_rules(rules_content, verbose, all_events, m_extra, m_replace_container_info, m_min_priority, required_engine_version, m_required_plugin_versions);
+	required_engine_version = m_rule_loader.get_required_engine_version();
+	for (auto &v : m_rule_loader.get_required_plugin_versions())
+	{
+		if (m_required_plugin_versions.find(v.first) == m_required_plugin_versions.end())
+		{
+			m_required_plugin_versions[v.first] = {};
+		}
+		m_required_plugin_versions[v.first].push_back(v.second);
+	}
+	if (verbose && os.str() != "") {
+		// We don't really have a logging callback
+		// from the falco engine, but this would be a
+		// good place to use it.
+		fprintf(stderr, "When reading rules content: %s", os.str().c_str());
+	}
 }
 
 void falco_engine::load_rules_file(const string &rules_filename, bool verbose, bool all_events)
@@ -278,7 +306,7 @@ std::shared_ptr<gen_event_formatter> falco_engine::create_formatter(const std::s
 	return it->second->create_formatter(output);
 }
 
-unique_ptr<falco_engine::rule_result> falco_engine::process_event(std::string &source, gen_event *ev, uint16_t ruleset_id)
+unique_ptr<struct falco_engine::rule_result> falco_engine::process_event(std::string &source, gen_event *ev, uint16_t ruleset_id)
 {
 	if(should_drop_evt())
 	{
@@ -333,57 +361,25 @@ std::shared_ptr<gen_event_filter_factory> falco_engine::get_filter_factory(const
 
 void falco_engine::populate_rule_result(unique_ptr<struct rule_result> &res, gen_event *ev)
 {
-	// std::lock_guard<std::mutex> guard(m_ls_semaphore);
-	// lua_getglobal(m_ls, lua_on_event.c_str());
-	// if(lua_isfunction(m_ls, -1))
-	// {
-	// 	lua_pushnumber(m_ls, ev->get_check_id());
-	// 	if(lua_pcall(m_ls, 1, 5, 0) != 0)
-	// 	{
-	// 		const char* lerr = lua_tostring(m_ls, -1);
-	// 		string err = "Error invoking function output: " + string(lerr);
-	// 		throw falco_exception(err);
-	// 	}
-	// 	const char *p =  lua_tostring(m_ls, -5);
-	// 	res->rule = p;
-	// 	res->evt = ev;
-	// 	res->priority_num = (falco_common::priority_type) lua_tonumber(m_ls, -4);
-	// 	res->format = lua_tostring(m_ls, -3);
-
-	// 	// Tags are passed back as a table, and is on the top of the stack
-	// 	lua_pushnil(m_ls);  /* first key */
-	// 	while (lua_next(m_ls, -2) != 0) {
-	// 		// key is at index -2, value is at index
-	// 		// -1. We want the value.
-	// 		res->tags.insert(luaL_checkstring(m_ls, -1));
-
-	// 		// Remove value, keep key for next iteration
-	// 		lua_pop(m_ls, 1);
-	// 	}
-	// 	lua_pop(m_ls, 1); // Clean table leftover
-
-	// 	// Exception fields are passed back as a table
-	// 	lua_pushnil(m_ls);  /* first key */
-	// 	while (lua_next(m_ls, -2) != 0) {
-	// 		// key is at index -2, value is at index
-	// 		// -1. We want the keys.
-	// 		res->exception_fields.insert(luaL_checkstring(m_ls, -2));
-
-	// 		// Remove value, keep key for next iteration
-	// 		lua_pop(m_ls, 1);
-	// 	}
-
-	// 	lua_pop(m_ls, 4);
-	// }
-	// else
-	// {
-	// 	throw falco_exception("No function " + lua_on_event + " found in lua compiler module");
-	// }
+	res->evt = ev;
+	m_rule_loader.get_rule_info(
+		ev->get_check_id(),
+		res->rule,
+		res->format,
+		res->priority_num,
+		res->tags);
 }
 
 void falco_engine::describe_rule(string *rule)
 {
-	// return m_rules->describe_rule(rule);
+	if (rule == NULL)
+	{
+		m_rule_loader.describe_rules();
+	}
+	else
+	{
+		m_rule_loader.describe_rule(*rule);
+	}
 }
 
 // Print statistics on the rules that triggered

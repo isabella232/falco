@@ -29,9 +29,8 @@ limitations under the License.
 #include <nlohmann/json.hpp>
 
 #include "gen_filter.h"
-#include "rules.h"
 #include "ruleset.h"
-
+#include "rule_loader.h"
 #include "falco_common.h"
 
 //
@@ -235,7 +234,7 @@ private:
 	// Maps from event source to the set of rules for that event source
 	std::map<std::string, std::shared_ptr<falco_ruleset>> m_rulesets;
 
-	// std::unique_ptr<falco_rules> m_rules; todo: use rule_loader here (not sure why the unique ptr)
+	rule_loader m_rule_loader;
 	uint16_t m_next_ruleset_id;
 	std::map<string, uint16_t> m_known_rulesets;
 	falco_common::priority_type m_min_priority;
