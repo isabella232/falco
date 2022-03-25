@@ -46,8 +46,6 @@ set(
   string-view-lite
   libyaml
   b64
-  luajit
-  lyaml
   cxxopts
 )
 
