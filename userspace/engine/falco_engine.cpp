@@ -42,6 +42,8 @@ falco_engine::falco_engine(bool seed_rng)
 	  m_replace_container_info(false)
 {
 	m_required_plugin_versions.clear();
+	m_rule_stats_manager.clear();
+	m_rule_collection.clear();
 
 	if(seed_rng)
 	{
@@ -148,7 +150,13 @@ void falco_engine::load_rules(const string &rules_content, bool verbose, bool al
 
 void falco_engine::load_rules(const string &rules_content, bool verbose, bool all_events, uint64_t &required_engine_version)
 {
-	bool success = m_rule_loader.load(this, rules_content, m_min_priority, m_replace_container_info, m_extra);
+	bool success = m_rule_loader.load(
+		this,
+		&m_rule_collection, 
+		rules_content,
+		m_min_priority,
+		m_replace_container_info,
+		m_extra);
 	std::ostringstream os;
 	if (m_rule_loader.errors().size() > 0)
 	{
@@ -329,6 +337,7 @@ unique_ptr<struct falco_engine::rule_result> falco_engine::process_event(std::st
 	res->source = source;
 
 	populate_rule_result(res, ev);
+	m_rule_stats_manager.on_event(&m_rule_collection, ev->get_check_id());
 
 	return res;
 }
@@ -362,45 +371,29 @@ std::shared_ptr<gen_event_filter_factory> falco_engine::get_filter_factory(const
 void falco_engine::populate_rule_result(unique_ptr<struct rule_result> &res, gen_event *ev)
 {
 	res->evt = ev;
-	m_rule_loader.get_rule_info(
-		ev->get_check_id(),
-		res->rule,
-		res->format,
-		res->priority_num,
-		res->tags);
+	auto rule = m_rule_collection.get(ev->get_check_id());
+	if (!rule)
+	{
+		throw falco_exception("populate_rule_result error: unknown rule id "
+				+ to_string(ev->get_check_id()));
+	}
+	res->rule = rule->name;
+	res->format = rule->output;
+	res->priority_num = rule->priority;
+	res->tags = rule->tags;
 }
 
 void falco_engine::describe_rule(string *rule)
 {
-	if (rule == NULL)
-	{
-		m_rule_loader.describe_rules();
-	}
-	else
-	{
-		m_rule_loader.describe_rule(*rule);
-	}
+	// todo: implement this
 }
 
 // Print statistics on the rules that triggered
 void falco_engine::print_stats()
 {
-	// lua_getglobal(m_ls, lua_print_stats.c_str());
-
-	// if(lua_isfunction(m_ls, -1))
-	// {
-	// 	if(lua_pcall(m_ls, 0, 0, 0) != 0)
-	// 	{
-	// 		const char* lerr = lua_tostring(m_ls, -1);
-	// 		string err = "Error invoking function print_stats: " + string(lerr);
-	// 		throw falco_exception(err);
-	// 	}
-	// }
-	// else
-	// {
-	// 	throw falco_exception("No function " + lua_print_stats + " found in lua rule loader module");
-	// }
-
+	string out;
+	m_rule_stats_manager.print_stats(&m_rule_collection, out);
+	fprintf(stderr, "%s", out.c_str());
 }
 
 void falco_engine::add_filter(std::shared_ptr<gen_event_filter> filter,

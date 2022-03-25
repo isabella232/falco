@@ -21,6 +21,7 @@ limitations under the License.
 #include <map>
 #include <yaml-cpp/yaml.h>
 #include <filter/parser.h>
+#include "rule_collection.h"
 #include "filter_macro_resolver.h"
 #include "falco_common.h"
 
@@ -36,21 +37,11 @@ public:
     // called for each ruleset file
     bool load(
         falco_engine* engine,
+        rule_collection* collection,
         const std::string &rules_content,
         falco_common::priority_type min_priority,
         bool replace_container_info,
         string fmt_extra);
-
-    void describe_rule(std::string rule_name);
-    void describe_rules();
-
-    // todo: move this to a rule_collection class
-    void get_rule_info(
-        uint32_t id,
-        std::string& name,
-        std::string& output,
-        falco_common::priority_type& priority,
-        std::set<std::string>& tags);
     
     // of last load() call
     std::vector<std::string>& errors();
@@ -85,6 +76,7 @@ private:
         bool used;
     };
 
+    // todo: make this use falco_rule
     struct rule_info
     {
         uint32_t index;
@@ -105,7 +97,6 @@ private:
 
     // stores rules in the engine
     bool compile(
-        falco_engine* engine,
         bool replace_container_info,
         string fmt_extra);
 
@@ -159,4 +150,5 @@ private:
     // used only during method exec
     falco_common::priority_type m_min_priority;
     falco_engine* m_engine;
+    rule_collection* m_collection;
 };

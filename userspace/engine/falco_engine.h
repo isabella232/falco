@@ -30,7 +30,9 @@ limitations under the License.
 
 #include "gen_filter.h"
 #include "ruleset.h"
+#include "rule_collection.h"
 #include "rule_loader.h"
+#include "stats_manager.h"
 #include "falco_common.h"
 
 //
@@ -234,7 +236,11 @@ private:
 	// Maps from event source to the set of rules for that event source
 	std::map<std::string, std::shared_ptr<falco_ruleset>> m_rulesets;
 
+	// todo(jasondellaluce): document this
 	rule_loader m_rule_loader;
+	rule_collection m_rule_collection;
+	stats_manager m_rule_stats_manager;
+
 	uint16_t m_next_ruleset_id;
 	std::map<string, uint16_t> m_known_rulesets;
 	falco_common::priority_type m_min_priority;

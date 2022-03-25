@@ -79,6 +79,7 @@ void rule_loader::clear()
 
 bool rule_loader::load(
         falco_engine* engine,
+        rule_collection* collection,
         const std::string &rules_content,
         falco_common::priority_type min_priority,
         bool replace_container_info,
@@ -88,6 +89,7 @@ bool rule_loader::load(
     m_errors.clear();
     m_warnings.clear();
     m_engine = engine;
+    m_collection = collection;
 
     // load yaml document
     YAML::Node document;
@@ -135,16 +137,19 @@ bool rule_loader::load(
         }
     }
 
-    return compile(m_engine, replace_container_info, fmt_extra);
+    return compile(replace_container_info, fmt_extra);
 }
 
-bool rule_loader::compile(falco_engine* engine, bool replace_container_info, string fmt_extra)
+bool rule_loader::compile(
+        bool replace_container_info,
+        string fmt_extra)
 {
     string errstr;
     filter_macro_resolver macro_resolver;
 
-    m_engine = engine;
+    // reset rules knowledge base
     m_engine->clear_filters();
+    m_collection->clear();
 
     // expand lists
     for (auto &l : m_lists)
@@ -925,9 +930,15 @@ rule_loader::rule_info* rule_loader::find_rule(const std::string& name)
 bool rule_loader::collect_rule(rule_info& rule, std::shared_ptr<libsinsp::filter::ast::expr> condition)
 {
     string errstr;
-    auto it = std::find_if(m_rules.begin(), m_rules.end(),
-        [&rule](const rule_info &r) { return r.name == rule.name; });
-    uint32_t rule_id = it - m_rules.begin();
+    // todo: falco_rule should be part of rule_info
+    falco_rule new_rule;
+    new_rule.name = rule.name;
+    new_rule.source = rule.source;
+    new_rule.description = rule.description;
+    new_rule.priority = rule.priority;
+    new_rule.tags = rule.tags;
+    new_rule.output = rule.output;
+    uint32_t rule_id = m_collection->add(new_rule);
     auto filter = compile_condition(condition, rule.source, rule_id, errstr);
     if (!filter)
     {
@@ -971,33 +982,4 @@ bool rule_loader::is_format_valid(std::string src, std::string fmt, std::string&
 		errstr = e.what();
 		return false;
 	}
-}
-
-void rule_loader::describe_rule(std::string rule_name)
-{
-    // todo: implement this
-}
-
-void rule_loader::describe_rules()
-{
-    // todo: implement this
-}
-
-void rule_loader::get_rule_info(
-        uint32_t id,
-        std::string& name,
-        std::string& output,
-        falco_common::priority_type& priority,
-        std::set<std::string>& tags)
-{
-    if (id >= m_rules.size())
-    {
-        throw falco_exception("populate_rule_result error: unknown rule id " + to_string(id));
-    }
-    auto rule = &m_rules[id];
-    name = rule->name;
-    priority = rule->priority;
-    output = rule->output;
-    tags = rule->tags;
-    // res->exception_fields = ... todo: implement exception fields
 }

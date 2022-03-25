@@ -16,6 +16,7 @@ set(FALCO_ENGINE_SOURCE_FILES
     falco_utils.cpp
     json_evt.cpp
     rule_loader.cpp
+    stats_manager.cpp
     ruleset.cpp
     formats.cpp
     filter_macro_resolver.cpp)
