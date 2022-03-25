@@ -50,7 +50,7 @@ void rule_loader::clear()
     m_required_plugin_versions.clear();
 }
 
-bool rule_loader::load(const std::string &rules_content)
+bool rule_loader::load(falco_engine* engine, const std::string &rules_content)
 {
     // todo: grab these from parameters
     m_min_priority = falco_common::priority_type::PRIORITY_DEBUG;
@@ -62,6 +62,7 @@ bool rule_loader::load(const std::string &rules_content)
     m_macros.clear();
     m_lists.clear();
     m_rules.clear();
+    m_engine = engine;
 
     // load yaml document
     YAML::Node document;
@@ -112,12 +113,14 @@ bool rule_loader::load(const std::string &rules_content)
     return true;
 }
 
-bool rule_loader::compile()
+bool rule_loader::compile(falco_engine* engine)
 {
     string errstr;
     filter_macro_resolver macro_resolver;
 
-    // todo: m_engine->clear_filters();
+    m_engine = engine;
+    m_engine->clear_filters();
+
     // expand lists
     for (auto &l : m_lists)
     {
@@ -127,6 +130,8 @@ bool rule_loader::compile()
         for (auto &v : l.values)
         {
             auto ref = find_list(v);
+            // note: there is a visibility ordering between lists,
+            // which means that lists can only use lists defined before them
             if (ref && ref->id < l.id_visibility)
             {
                 ref->used = true;
@@ -151,13 +156,13 @@ bool rule_loader::compile()
         // and L being the # of lists.
         for (auto &l : m_lists)
         {
-            if (l.id < m.id_visibility)
+            // note: there is no visibility ordering between macros,
+            // and lists, which means that macros can use lists defined
+            // after them.
+            if (!resolve_list(m.condition, l))
             {
-                if (!resolve_list(m.condition, l))
-                {
-                    // todo: print an error (this is not supposed to ever trigger tho)
-                    return false;
-                }
+                // todo: print an error (this is not supposed to ever trigger tho)
+                return false;
             }
         }
         m.condition_ast = parse_condition(m.condition, errstr);
@@ -173,6 +178,8 @@ bool rule_loader::compile()
     for (auto &m: m_macros)
     {
         // note: this is O(M^2) with M being the # of macros
+        // note: there is a visibility ordering between macros,
+        // which means that macros can only use macros defined before them
         for (auto &ref : m_macros)
         {
             if (ref.id != m.id && ref.id < m.id_visibility)
@@ -204,6 +211,11 @@ bool rule_loader::compile()
     uint32_t n_rules = 0;
     for (auto &r: m_rules)
     {
+        if (r.skipped)
+        {
+            continue;
+        }
+
         // todo: compile exception as ast here and add it to condition
         // we may beed to do it using string concat to not introduce
         // breaking changes
@@ -213,13 +225,13 @@ bool rule_loader::compile()
         // and L being the # of lists.
         for (auto &l : m_lists)
         {
-            if (l.id < r.id_visibility)
+            // note: there is no visibility ordering between rules,
+            // and lists, which means that rules can use lists defined
+            // after them.
+            if (!resolve_list(condition, l))
             {
-                if (!resolve_list(condition, l))
-                {
-                    // todo: print an error (this is not supposed to ever trigger tho)
-                    return false;
-                }
+                // todo: print an error (this is not supposed to ever trigger tho)
+                return false;
             }
         }
         auto condition_ast = parse_condition(condition, errstr);
@@ -233,14 +245,10 @@ bool rule_loader::compile()
         // and M being the # of macros
         for (auto &ref : m_macros)
         {
-            if (ref.id < r.id_visibility)
-            {
-                macro_resolver.set_macro(ref.name, ref.condition_ast);
-            }
-            else
-            {
-                macro_resolver.set_macro(ref.name, nullptr);
-            }
+            // note: there is no visibility ordering between rules,
+            // and macros, which means that rules can use macros defined
+            // after them.
+            macro_resolver.set_macro(ref.name, ref.condition_ast);
         }
         macro_resolver.run(condition_ast);
         if(!macro_resolver.get_unknown_macros().empty())
@@ -258,9 +266,10 @@ bool rule_loader::compile()
 
         // todo: add extra info to rule output (e.g. container.info)
 
-        if (false) // todo: check if output is valid engine->is_format_valid
+        if (!is_format_valid(r.source, r.output, errstr))
         {
-            add_error("rule '" + r.name +"' invalid output format: XXXX"); // todo: fill-in error
+            add_error("rule '" + r.name +"' invalid output format: " + errstr);
+            return false;
         }
 
         // compile rule
@@ -280,7 +289,7 @@ bool rule_loader::compile()
         }
         else
         {
-            store_rule_filter(r, filter);
+            collect_rule_filter(r, filter);
         }
     }
 
@@ -314,7 +323,13 @@ bool rule_loader::parse_required_engine_version(bool& parsed, const YAML::Node& 
             add_error("value of required_engine_version must be a number");
             return false;
         }
-        // todo: do version check towards falco_engine
+        if (m_engine->engine_version() < ver)
+        {
+            add_error("rules require engine version " + to_string(ver)
+                    + ", but engine version is "
+                    + to_string(m_engine->engine_version()));
+            return false;
+        }
     }
     return true;
 }
@@ -383,7 +398,7 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
             m.source = s_syscall_source;
         }
 
-        if (false) // todo: check if macro source is valid using the engine (falco_rules.is_source_valid)
+        if (!m_engine->is_source_valid(m.source))
         {
             add_warning("macro '" + m.name
                 + "': warning (unknown-source): unknown source '"
@@ -545,7 +560,8 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
         {
             r.source = s_syscall_source;
         }
-        if (false) // todo: check if rule source is valid using the engine (falco_rules.is_source_valid)
+
+        if (!m_engine->is_source_valid(r.source))
         {
             add_warning("rule '" + r.name
                 + "': warning (unknown-source): unknown source '"
@@ -637,7 +653,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                     return false;
                 }
                 r.enabled = true;
-                r.skipped = r.priority <= m_min_priority; // note: we fixed a bug, because priority could not be overriden before
+                r.skipped = r.priority > m_min_priority; // note: we fixed a bug, because priority could not be overriden before
                 if(!YAML::convert<string>::decode(item["condition"], r.condition))
                 {
                     // todo: print a warning failed decoding
@@ -715,7 +731,7 @@ gen_event_filter* rule_loader::compile_condition(
 {
     try
     {
-        std::shared_ptr<gen_event_filter_factory> factory; // todo: engine->get_filter_factory(source)
+        auto factory = m_engine->get_filter_factory(source);
         sinsp_filter_compiler compiler(factory, condition);
         compiler.set_check_id(rule_id);
         return compiler.compile();
@@ -869,9 +885,10 @@ rule* rule_loader::find_rule(const std::string& name)
     return nullptr;
 }
 
-void rule_loader::store_rule_filter(rule& rule, gen_event_filter* filter)
+void rule_loader::collect_rule_filter(rule& rule, gen_event_filter* filter)
 {
     // todo: implement this engine->add_filter()
+    printf("ADDED RULE: %s\n", rule.name.c_str());
     if (rule.source == s_syscall_source)
     {
         auto evttypes = filter->evttypes();
@@ -886,4 +903,21 @@ void rule_loader::store_rule_filter(rule& rule, gen_event_filter* filter)
     // todo: enable rule in default ruleset engine->enable_rule()
 
 
+}
+
+// todo: decide what's passed by reference and what not... in all the methods :)
+bool rule_loader::is_format_valid(std::string src, std::string fmt, std::string& errstr)
+{
+    return true; // todo: drop this once everything works
+    try
+	{
+		std::shared_ptr<gen_event_formatter> formatter;
+		formatter = m_engine->create_formatter(src, fmt);
+        return true;
+	}
+	catch(exception &e)
+	{
+		errstr = e.what();
+		return false;
+	}
 }

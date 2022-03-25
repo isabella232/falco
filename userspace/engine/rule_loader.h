@@ -22,7 +22,8 @@ limitations under the License.
 #include <yaml-cpp/yaml.h>
 #include <filter/parser.h>
 #include "filter_macro_resolver.h"
-#include "falco_common.h" // todo: define priority_type elsewhere
+#include "falco_common.h"
+#include "falco_engine.h"
 
 // todo: better naming & namespace
 struct rule
@@ -72,11 +73,11 @@ public:
 
     // todo: better naming
     // called for each ruleset file
-    bool load(const std::string &rules_content);
+    bool load(falco_engine* engine, const std::string &rules_content);
 
     // todo: better naming
     // called once after all ruleset files are loaded
-    bool compile();
+    bool compile(falco_engine* engine);
     
     std::vector<std::string>& errors();
 
@@ -105,7 +106,8 @@ private:
         std::string& errstr);
     
     // engine helpers
-    void store_rule_filter(rule& rule, gen_event_filter* filter);
+    void collect_rule_filter(rule& rule, gen_event_filter* filter);
+    bool is_format_valid(std::string src, std::string fmt, std::string& errstr);
 
     // list helpers
     void quote_item(std::string& item);
@@ -128,4 +130,5 @@ private:
     std::vector<rule_list> m_lists;
     std::vector<rule> m_rules;
     std::map<std::string, std::string> m_required_plugin_versions;
+    falco_engine* m_engine;
 };

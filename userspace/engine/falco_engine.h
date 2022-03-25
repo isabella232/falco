@@ -177,6 +177,11 @@ public:
 	void add_source(const std::string &source,
 			std::shared_ptr<gen_event_filter_factory> filter_factory,
 			std::shared_ptr<gen_event_formatter_factory> formatter_factory);
+	
+	// todo(jasondellaluce): this is here for internal use, and
+	// will possibly be removed in the future
+	std::shared_ptr<gen_event_filter_factory> get_filter_factory(
+		const std::string &source);
 
 	// Return whether or not there is a valid filter/formatter
 	// factory for this source.
@@ -230,7 +235,7 @@ private:
 	// Maps from event source to the set of rules for that event source
 	std::map<std::string, std::shared_ptr<falco_ruleset>> m_rulesets;
 
-	std::unique_ptr<falco_rules> m_rules;
+	// std::unique_ptr<falco_rules> m_rules; todo: use rule_loader here (not sure why the unique ptr)
 	uint16_t m_next_ruleset_id;
 	std::map<string, uint16_t> m_known_rulesets;
 	falco_common::priority_type m_min_priority;

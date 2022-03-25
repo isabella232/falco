@@ -29,7 +29,13 @@ TEST_CASE("RULE LOADER EXAMPLE", "[rule_loader]")
 	std::stringstream buffer;
 	buffer << file.rdbuf();
 
-	if (loader.load(buffer.str()) && loader.compile())
+	sinsp inspector;
+	falco_engine engine(true);
+	std::shared_ptr<gen_event_filter_factory> syscall_filter_factory(new sinsp_filter_factory(&inspector));
+	std::shared_ptr<gen_event_formatter_factory> syscall_formatter_factory(new sinsp_evt_formatter_factory(&inspector));
+	engine.add_source("syscall", syscall_filter_factory, syscall_formatter_factory);
+
+	if (loader.load(&engine, buffer.str()) && loader.compile(&engine))
 	{
 		REQUIRE(true);
 	}

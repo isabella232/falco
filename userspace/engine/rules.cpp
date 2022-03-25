@@ -64,29 +64,29 @@ bool falco_rules::is_source_valid(const std::string &source)
 
 bool falco_rules::is_format_valid(const std::string &source, const std::string &format, std::string &errstr)
 {
-	bool ret = true;
+	// bool ret = true;
 
-	try
-	{
-		std::shared_ptr<gen_event_formatter> formatter;
+	// try
+	// {
+	// 	std::shared_ptr<gen_event_formatter> formatter;
 
-		formatter = m_engine->create_formatter(source, format);
-	}
-	catch(exception &e)
-	{
-		std::ostringstream os;
+	// 	formatter = m_engine->create_formatter(source, format);
+	// }
+	// catch(exception &e)
+	// {
+	// 	std::ostringstream os;
 
-		os << "Invalid output format '"
-		   << format
-		   << "': '"
-		   << e.what()
-		   << "'";
+	// 	os << "Invalid output format '"
+	// 	   << format
+	// 	   << "': '"
+	// 	   << e.what()
+	// 	   << "'";
 
-		errstr = os.str();
-		ret = false;
-	}
+	// 	errstr = os.str();
+	// 	ret = false;
+	// }
 
-	return ret;
+	return true;
 }
 
 bool falco_rules::is_defined_field(const std::string &source, const std::string &fldname)

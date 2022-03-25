@@ -148,16 +148,16 @@ void falco_engine::load_rules(const string &rules_content, bool verbose, bool al
 
 void falco_engine::load_rules(const string &rules_content, bool verbose, bool all_events, uint64_t &required_engine_version)
 {
-	if(!m_rules)
-	{
-		m_rules.reset(new falco_rules(this));
-		for(auto const &it : m_filter_factories)
-		{
-			m_rules->add_filter_factory(it.first, it.second);
-		}
-	}
+	// if(!m_rules)
+	// {
+	// 	m_rules.reset(new falco_rules(this));
+	// 	for(auto const &it : m_filter_factories)
+	// 	{
+	// 		// m_rules->add_filter_factory(it.first, it.second);
+	// 	}
+	// }
 
-	m_rules->load_rules(rules_content, verbose, all_events, m_extra, m_replace_container_info, m_min_priority, required_engine_version, m_required_plugin_versions);
+	// m_rules->load_rules(rules_content, verbose, all_events, m_extra, m_replace_container_info, m_min_priority, required_engine_version, m_required_plugin_versions);
 }
 
 void falco_engine::load_rules_file(const string &rules_filename, bool verbose, bool all_events)
@@ -319,6 +319,16 @@ void falco_engine::add_source(const std::string &source,
 
 	std::shared_ptr<falco_ruleset> ruleset(new falco_ruleset());
 	m_rulesets[source] = ruleset;
+}
+
+std::shared_ptr<gen_event_filter_factory> falco_engine::get_filter_factory(const std::string &source)
+{
+	auto it = m_filter_factories.find(source);
+	if(it == m_filter_factories.end())
+	{
+		throw falco_exception(string("unknown event source: ") + source);
+	}
+	return it->second;
 }
 
 void falco_engine::populate_rule_result(unique_ptr<struct rule_result> &res, gen_event *ev)
