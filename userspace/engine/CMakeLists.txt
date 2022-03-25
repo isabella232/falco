@@ -25,7 +25,7 @@ add_library(falco_engine STATIC ${FALCO_ENGINE_SOURCE_FILES})
 add_dependencies(falco_engine njson string-view-lite)
 
 if(USE_BUNDLED_DEPS)
-  add_dependencies(falco_engine libyaml)
+  add_dependencies(falco_engine libyaml yamlcpp)
 endif()
 
 if(MINIMAL_BUILD)
@@ -37,6 +37,7 @@ if(MINIMAL_BUILD)
       "${STRING_VIEW_LITE_INCLUDE}"
       "${LIBSCAP_INCLUDE_DIRS}"
       "${LIBSINSP_INCLUDE_DIRS}"
+      "${YAMLCPP_INCLUDE_DIR}"
       "${PROJECT_BINARY_DIR}/userspace/engine")
 else()
   target_include_directories(
@@ -48,7 +49,8 @@ else()
       "${STRING_VIEW_LITE_INCLUDE}"
       "${LIBSCAP_INCLUDE_DIRS}"
       "${LIBSINSP_INCLUDE_DIRS}"
+      "${YAMLCPP_INCLUDE_DIR}"
       "${PROJECT_BINARY_DIR}/userspace/engine")
 endif()
 
-target_link_libraries(falco_engine "${FALCO_SINSP_LIBRARY}" "${LIBYAML_LIB}")
+target_link_libraries(falco_engine "${FALCO_SINSP_LIBRARY}" "${LIBYAML_LIB}" "${LIBYAML_LIB}")
