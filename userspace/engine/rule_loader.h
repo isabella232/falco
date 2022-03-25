@@ -21,27 +21,24 @@ limitations under the License.
 #include <map>
 #include <yaml-cpp/yaml.h>
 #include <filter/parser.h>
+#include "filter_macro_resolver.h"
 #include "falco_common.h" // todo: define priority_type elsewhere
 
 // todo: better naming & namespace
 struct rule
 {
     uint32_t id;
-    std::string name; //
-    std::string description; //
-    std::string output; //
-    std::string condition; //
-    std::string source; //
-	std::set<std::string> tags; //
-    std::set<std::string> exception_fields;
-	std::shared_ptr<gen_event_filter> filter;
-    falco_common::priority_type priority; //
-    bool skip_if_unknown_filter; //
-    bool enabled; //
-    bool skipped; //
-
-    // todo: this now prints to ostream and is a method of the rule
-    // void describe(std::ostream& os) {}
+    std::string name;
+    std::string description;
+    std::string output;
+    std::string condition;
+    std::string source;
+	std::set<std::string> tags;
+    // todo: exceptions
+    falco_common::priority_type priority;
+    bool skip_if_unknown_filter;
+    bool enabled;
+    bool skipped;
 };
 
 // todo: better naming & namespace
@@ -51,9 +48,6 @@ struct rule_macro
     std::string name;
     std::string condition;
     std::string source;
-	std::shared_ptr<
-        libsinsp::filter::ast::expr
-    > condition_ast;
 };
 
 // todo: better naming & namespace
@@ -74,8 +68,11 @@ public:
     std::vector<std::string>& warnings();
 
 private:
+    // error management helpers
     void add_error(std::string e);
     void add_warning(std::string e);
+
+    // element helpers
     bool parse_required_engine_version(bool& parsed, const YAML::Node& item);
     bool parse_required_plugin_versions(bool& parsed, const YAML::Node& item);
     bool parse_macro(bool& parsed, const YAML::Node& item);
@@ -83,12 +80,29 @@ private:
     bool parse_rule(bool& parsed, const YAML::Node& item);
     bool parse_priority_name(std::string v, falco_common::priority_type& out);
 
+    // condition helpers
+    std::shared_ptr<libsinsp::filter::ast::expr> parse_condition(
+        std::string condition);
+
+    // list helpers
+    void quote_item(std::string& item);
+    bool expand_list_items(std::string& condition);
+
+    // state helpers
+    void add_macro(rule_macro& e);
+    void add_list(rule_list& e);
+    void add_rule(rule& e);
+    rule_macro* find_macro(std::string& name);
+    rule_list* find_list(std::string& name);
+    rule* find_rule(std::string& name);
+
+    // state variables
     uint32_t m_last_id;
+    std::vector<std::string> m_errors;
+    std::vector<std::string> m_warnings;
     falco_common::priority_type m_min_priority;
     std::vector<rule_macro> m_macros;
     std::vector<rule_list> m_lists;
     std::vector<rule> m_rules;
-    std::vector<std::string> m_errors;
-    std::vector<std::string> m_warnings;
     std::map<std::string, std::string> m_required_plugin_versions;
 };

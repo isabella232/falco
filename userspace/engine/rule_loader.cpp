@@ -93,6 +93,7 @@ bool rule_loader::load(const std::string &rules_content)
             return false;
         }
 
+        // todo: add logic here (ensure that engine/plugin requirements are before rule/macro/lists, skip failed macros with warning...)
         bool parsed = false;
         if (!parse_required_engine_version(parsed, item)
             || !parse_required_plugin_versions(parsed, item)
@@ -180,7 +181,7 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
                 || !YAML::convert<string>::decode(item["condition"], m.condition)
                 || m.condition.empty())
         {
-            add_error("macro condition is empty");
+            add_error("macro '" + m.name + "' has empty condition");
             return false;
         }
 
@@ -207,10 +208,8 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
         }
         if (append)
         {
-            // todo: decide if we want to optimize linear search (maybe not)
-            auto prev = std::find_if(m_macros.begin(), m_macros.end(),
-		        [&m](const rule_macro &r) { return r.name == m.name; });
-            if (prev == m_macros.end())
+            auto prev = find_macro(m.name);
+            if (!prev)
             {
                 add_error("macro '" + m.name 
                     + "' has 'append' key but no macro by that name already exists");
@@ -227,7 +226,7 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
         {
             // todo: should we parse AST here and resolve macros seen so far?
             m.id = m_last_id++;
-            m_macros.push_back(m);
+            add_macro(m);
         }
     }
     return true;
@@ -289,7 +288,7 @@ bool rule_loader::parse_list(bool& parsed, const YAML::Node& item)
         {
             // todo: should we resolve existing lists here?
             l.id = m_last_id++;
-            m_lists.push_back(l);
+            add_list(l);
         }
 
     }
@@ -327,7 +326,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
         {
             r.source = s_syscall_source;
         }
-        if (false) // todo: check if macro source is valid using the engine (falco_rules.is_source_valid)
+        if (false) // todo: check if rule source is valid using the engine (falco_rules.is_source_valid)
         {
             add_warning("rule '" + r.name
                 + "': warning (unknown-source): unknown source '"
@@ -448,7 +447,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                 if (prev == m_rules.end())
                 {
                     // rule has been defined for the first time
-                    m_rules.push_back(r);
+                    add_rule(r);
                 }
                 else
                 {
@@ -503,4 +502,162 @@ bool rule_loader::parse_priority_name(string v, falco_common::priority_type& out
         return false;
     }
     return true;
+}
+
+std::shared_ptr<libsinsp::filter::ast::expr> rule_loader::parse_condition(
+        std::string condition)
+{
+    libsinsp::filter::parser p(condition);
+	p.set_max_depth(1000);
+	try
+	{
+        std::shared_ptr<libsinsp::filter::ast::expr> res_ptr(p.parse());
+        return res_ptr;
+	}
+	catch (const sinsp_exception& e)
+	{
+        // todo: decide if this is the right place to place the error
+        add_error(to_string(p.get_pos().col) + ": " + e.what());
+        return nullptr;
+	}
+}
+
+// todo(jasondellaluce): this is broken, specially towards value escaping.
+// For now we need to keep resolving lists by text substitution to avoid
+// introducing breaking changes. This is a 1-1 porting of the function
+// we had in Lua.
+bool rule_loader::expand_list_items(std::string& condition)
+{
+    static string blanks = " \t\n\r";
+    static string delimiters = blanks + "(),=";
+    string new_cond;
+    size_t start, end;
+    for (auto &list : m_lists)
+    {
+        start = condition.find(list.name);
+        while (start != string::npos)
+        {
+            // the characters surrounding the name must be delimiters of beginning/end of string
+            end = start + list.name.length();
+            if ((start == 0 || delimiters.find(condition[start - 1]) != string::npos)
+                    && (end >= condition.length() || delimiters.find(condition[end]) != string::npos))
+            {
+                // shift pointers to consume all whitespaces
+                while (start > 0 && blanks.find(condition[start - 1]) != string::npos)
+                {
+                    start--;
+                }
+                while (end < condition.length() && blanks.find(condition[end]) != string::npos)
+                {
+                    end++;
+                }
+                
+                // create substitution string by concatenating all values
+                string sub = "";
+                for (auto &v : list.values)
+                {
+                    if (!sub.empty())
+                    {
+                        sub += ", ";
+                    }
+                    sub += v;
+                }
+
+                // if substituted list is empty, we need to remove a comma from the left or the right
+                if (list.values.empty())
+                {
+                    if (start > 0 && condition[start - 1] == ',')
+                    {
+                        start--;
+                    }
+                    else if (end < condition.length() && condition[end] == ',')
+                    {
+                        end++;
+                    }
+                }
+                
+                // compose new string with substitution
+                new_cond = "";
+                if (start > 0)
+                {
+                    new_cond += condition.substr(0, start);
+                }
+                new_cond += sub;
+                if (end <= condition.length())
+                {
+                    new_cond += condition.substr(end);
+                }
+                condition = new_cond;
+                start += sub.length();
+            }
+            start = condition.find(list.name, start + 1);
+        }
+    }
+    return true;
+}
+
+// todo(jasondellaluce): this is the reason why escaping is totally broken
+// in lists and exceptions. In this first refactor of the rule-loader, we
+// keep this in order to not introduce breaking changes, but this needs
+// to be changed in the future
+void rule_loader::quote_item(std::string& item)
+{
+    if (item.find(" ") != std::string::npos)
+    {
+        if (item[0] != '"' && item[0] != '\'')
+        {
+            item = '"' + item + '"';
+        }
+    }
+}
+
+void rule_loader::add_macro(rule_macro& e)
+{
+    m_macros.push_back(e);
+}
+
+void rule_loader::add_list(rule_list& e)
+{
+    m_lists.push_back(e);
+}
+
+void rule_loader::add_rule(rule& e)
+{
+    m_rules.push_back(e);
+}
+
+rule_macro* rule_loader::find_macro(std::string& name)
+{
+    // todo: decide if we want to optimize linear search (maybe not)
+    auto prev = std::find_if(m_macros.begin(), m_macros.end(),
+        [&name](const rule_macro &r) { return r.name == name; });
+    if (prev != m_macros.end())
+    {
+        return &*prev;
+    }
+    return nullptr;
+}
+
+rule_list* rule_loader::find_list(std::string& name)
+{
+    // todo: decide if we want to optimize linear search (maybe not)
+    auto prev = std::find_if(m_lists.begin(), m_lists.end(),
+        [&name](const rule_list &r) { return r.name == name; });
+    if (prev != m_lists.end())
+    {
+        return &*prev;
+    }
+    return nullptr;
+}
+
+rule* rule_loader::find_rule(std::string& name)
+{
+    // todo: decide if we want to optimize linear search (maybe not)
+    auto prev = std::find_if(m_rules.begin(), m_rules.end(),
+        [&name](const rule &r) { return r.name == name; });
+    if (prev != m_rules.end())
+    {
+        return &*prev;
+    }
+    return nullptr;
 }
