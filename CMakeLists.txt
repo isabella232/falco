@@ -149,9 +149,6 @@ endif()
 
 include(cxxopts)
 
-# libyaml
-include(libyaml)
-
 # One TBB
 include(tbb)
 

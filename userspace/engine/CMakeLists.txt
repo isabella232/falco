@@ -25,7 +25,7 @@ add_library(falco_engine STATIC ${FALCO_ENGINE_SOURCE_FILES})
 add_dependencies(falco_engine njson string-view-lite)
 
 if(USE_BUNDLED_DEPS)
-  add_dependencies(falco_engine libyaml yamlcpp)
+  add_dependencies(falco_engine yamlcpp)
 endif()
 
 if(MINIMAL_BUILD)
@@ -53,4 +53,4 @@ else()
       "${PROJECT_BINARY_DIR}/userspace/engine")
 endif()
 
-target_link_libraries(falco_engine "${FALCO_SINSP_LIBRARY}" "${LIBYAML_LIB}" "${LIBYAML_LIB}")
+target_link_libraries(falco_engine "${FALCO_SINSP_LIBRARY}" "${YAMLCPP_LIB}")
