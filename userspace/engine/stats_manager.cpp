@@ -34,7 +34,7 @@ void stats_manager::print_stats(rule_collection* rules, std::string& out)
     {
         if (m_by_priority[i] > 0)
         {
-            out += "    " + falco_common::priority_names[i]
+            out += "   " + falco_common::priority_names[i]
                     + ": " + to_string(m_by_priority[i]) + "\n";
         }
     }
@@ -45,7 +45,7 @@ void stats_manager::print_stats(rule_collection* rules, std::string& out)
     {
         if (m_by_rule_id[i] > 0)
         {
-            out += "    " + rules->get(i)->name
+            out += "   " + rules->get(i)->name
                 + ": " + to_string(m_by_rule_id[i]) + "\n";
         }
     }
