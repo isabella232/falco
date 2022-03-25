@@ -51,7 +51,7 @@ void rule_loader::clear()
 }
 
 bool rule_loader::load(const std::string &rules_content)
-{  
+{
     // todo: grab these from parameters
     m_min_priority = falco_common::priority_type::PRIORITY_DEBUG;
 
@@ -106,6 +106,197 @@ bool rule_loader::load(const std::string &rules_content)
         if (!parsed)
         {
             add_warning("unknown top level object: xxx"); // todo: print the object in some way
+        }
+    }
+
+    return true;
+}
+
+bool rule_loader::compile()
+{
+    string errstr;
+    filter_macro_resolver macro_resolver;
+
+    // todo: m_engine->clear_filters();
+    // expand lists
+    for (auto &l : m_lists)
+    {
+        vector<string> new_values;
+        // note: this is O(L) with L being the # of lists,
+        // because we achieve O(1) lookup in find_list()
+        for (auto &v : l.values)
+        {
+            auto ref = find_list(v);
+            if (ref && ref->id < l.id_visibility)
+            {
+                ref->used = true;
+                new_values.insert(new_values.end(), ref->values.begin(), ref->values.end());
+            }
+            else
+            {
+                new_values.push_back(v);
+            }
+        }
+        for (auto &v: new_values)
+        {
+            quote_item(v);
+        }
+        l.values = new_values;
+    }
+
+    // parse all macros
+    for (auto &m: m_macros)
+    {
+        // note: this is O(MxL) with M being the # of macros,
+        // and L being the # of lists.
+        for (auto &l : m_lists)
+        {
+            if (l.id < m.id_visibility)
+            {
+                if (!resolve_list(m.condition, l))
+                {
+                    // todo: print an error (this is not supposed to ever trigger tho)
+                    return false;
+                }
+            }
+        }
+        m.condition_ast = parse_condition(m.condition, errstr);
+        if (!m.condition_ast)
+        {
+            // todo: understand if we need to fail here or add a warning depending if macro is used or not
+            add_error("compilation error when compiling macro '" + m.name + "': " + errstr);
+            return false;
+        }
+    }
+
+    // validate/expand all macros
+    for (auto &m: m_macros)
+    {
+        // note: this is O(M^2) with M being the # of macros
+        for (auto &ref : m_macros)
+        {
+            if (ref.id != m.id && ref.id < m.id_visibility)
+            {
+                macro_resolver.set_macro(ref.name, ref.condition_ast);
+            }
+            else
+            {
+                macro_resolver.set_macro(ref.name, nullptr);
+            }
+        }
+        macro_resolver.run(m.condition_ast);
+        if(!macro_resolver.get_unknown_macros().empty())
+        {
+            // todo: understand if we need to fail here or add a warning depending if macro is used or not
+            add_error("compilation error when compiling macro '"
+                + m.name + "': undefined macro '"
+                + *macro_resolver.get_unknown_macros().begin()
+                + "' used in condition");
+            return false;
+        }
+        for (auto &resolved : macro_resolver.get_resolved_macros())
+        {
+            find_macro(resolved)->used = true;
+        }
+    }
+
+    // compile all rules and add them to engine
+    uint32_t n_rules = 0;
+    for (auto &r: m_rules)
+    {
+        // todo: compile exception as ast here and add it to condition
+        // we may beed to do it using string concat to not introduce
+        // breaking changes
+        string condition = r.condition;
+
+        // note: this is O(RxL) with M being the # of rules,
+        // and L being the # of lists.
+        for (auto &l : m_lists)
+        {
+            if (l.id < r.id_visibility)
+            {
+                if (!resolve_list(condition, l))
+                {
+                    // todo: print an error (this is not supposed to ever trigger tho)
+                    return false;
+                }
+            }
+        }
+        auto condition_ast = parse_condition(condition, errstr);
+        if (!condition_ast)
+        {
+            add_error("compilation error when compiling rule '" + r.name + "': " + errstr);
+            return false;
+        }
+
+        // note: this is O(R*M) with R being the # of rules,
+        // and M being the # of macros
+        for (auto &ref : m_macros)
+        {
+            if (ref.id < r.id_visibility)
+            {
+                macro_resolver.set_macro(ref.name, ref.condition_ast);
+            }
+            else
+            {
+                macro_resolver.set_macro(ref.name, nullptr);
+            }
+        }
+        macro_resolver.run(condition_ast);
+        if(!macro_resolver.get_unknown_macros().empty())
+        {
+            add_error("compilation error when compiling rule \'"
+                + r.name + "': undefined macro '"
+                + *macro_resolver.get_unknown_macros().begin()
+                + "' used in condition");
+            return false;
+        }
+        for (auto &resolved : macro_resolver.get_resolved_macros())
+        {
+            find_macro(resolved)->used = true;
+        }
+
+        // todo: add extra info to rule output (e.g. container.info)
+
+        if (false) // todo: check if output is valid engine->is_format_valid
+        {
+            add_error("rule '" + r.name +"' invalid output format: XXXX"); // todo: fill-in error
+        }
+
+        // compile rule
+        uint32_t rule_id = n_rules++;
+        auto filter = compile_condition(condition_ast.get(), r.source, rule_id, errstr);
+        if (!filter)
+        {
+            if (r.skip_if_unknown_filter && errstr.find("nonexistent field") != string::npos)
+            {
+                add_warning("rule '" + r.name +"' warning (unknown-field): " + errstr);
+            }
+            else
+            {
+                add_error("rule '" + r.name +"' error: " + errstr);
+                return false;
+            }
+        }
+        else
+        {
+            store_rule_filter(r, filter);
+        }
+    }
+
+    // print info on any dangling lists or macros that were not used anywhere
+    for (auto &m: m_lists)
+    {
+        if (!m.used)
+        {
+            add_warning("macro " + m.name + " not refered to by any rule/macro");
+        }
+    }
+    for (auto &l: m_lists)
+    {
+        if (!l.used)
+        {
+            add_warning("list " + l.name + " not refered to by any rule/macro/list");
         }
     }
 
@@ -225,7 +416,7 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
             // todo(jasondellaluce): consider doing AST concatenation in the future
             prev->condition += " ";
             prev->condition += m.condition;
-            prev->id_override = m_last_id++;
+            prev->id_visibility = m_last_id++;
             // todo: concatenate YAML context too
         }
         else
@@ -234,12 +425,13 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
             if (prev)
             {
                 prev->condition = m.condition;
-                prev->id_override = m_last_id++;
+                prev->id_visibility = m_last_id++;
             }
             else
             {
                 m.id = m_last_id++;
-                m.id_override = m.id;
+                m.id_visibility = m.id;
+                m.used = false;
                 add_macro(m);
             }
         }
@@ -294,7 +486,7 @@ bool rule_loader::parse_list(bool& parsed, const YAML::Node& item)
             }
             // todo(jasondellaluce): consider doing AST concatenation in the future
             prev->values.insert(prev->values.end(), l.values.begin(), l.values.end());
-            prev->id_override = m_last_id++;
+            prev->id_visibility = m_last_id++;
             // todo: concatenate YAML context too
         }
         else
@@ -302,13 +494,14 @@ bool rule_loader::parse_list(bool& parsed, const YAML::Node& item)
             // store list
             if (prev)
             {
-                prev->id_override = m_last_id++;
+                prev->id_visibility = m_last_id++;
                 prev->values = l.values;
             }
             else
             {
                 l.id = m_last_id++;
-                l.id_override = l.id;
+                l.id_visibility = l.id;
+                l.used = false;
                 add_list(l);
             }
         }
@@ -334,6 +527,14 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
         if(item["skip-if-unknown-filter"].IsDefined()
                 && !YAML::convert<bool>::decode(
                     item["skip-if-unknown-filter"], r.skip_if_unknown_filter))
+        {
+            // todo: print a warning failed decoding of 'append'
+        }
+
+        r.warn_evttypes = true;
+        if(item["warn_evttypes"].IsDefined()
+                && !YAML::convert<bool>::decode(
+                    item["warn_evttypes"], r.warn_evttypes))
         {
             // todo: print a warning failed decoding of 'append'
         }
@@ -396,7 +597,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                 prev->condition += r.condition;
             }
 
-            prev->id_override = m_last_id++;
+            prev->id_visibility = m_last_id++;
             // todo: concatenate context too
         }
         else
@@ -472,15 +673,14 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                 // store rule
                 if (prev)
                 {
-                    auto prev_id = prev->id;
                     r.id = prev->id;
-                    r.id_override = m_last_id++;
+                    r.id_visibility = m_last_id++;
                     *prev = r;
                 }
                 else
                 {
                     r.id = m_last_id++;
-                    r.id_override = r.id;
+                    r.id_visibility = r.id;
                     add_rule(r);
                 }
             }
@@ -534,7 +734,8 @@ bool rule_loader::parse_priority_name(string v, falco_common::priority_type& out
 }
 
 std::shared_ptr<libsinsp::filter::ast::expr> rule_loader::parse_condition(
-        std::string condition)
+        std::string condition,
+        std::string& errstr)
 {
     libsinsp::filter::parser p(condition);
 	p.set_max_depth(1000);
@@ -545,82 +746,103 @@ std::shared_ptr<libsinsp::filter::ast::expr> rule_loader::parse_condition(
 	}
 	catch (const sinsp_exception& e)
 	{
-        // todo: decide if this is the right place to place the error
-        add_error(to_string(p.get_pos().col) + ": " + e.what());
+        errstr = to_string(p.get_pos().col) + ": " + e.what();
         return nullptr;
 	}
+}
+
+gen_event_filter* rule_loader::compile_condition(
+        libsinsp::filter::ast::expr* condition,
+        string source,
+        uint32_t rule_id,
+        std::string& errstr)
+{
+    try
+    {
+        std::shared_ptr<gen_event_filter_factory> factory; // todo: engine->get_filter_factory(source)
+        sinsp_filter_compiler compiler(factory, condition);
+        compiler.set_check_id(rule_id);
+        return compiler.compile();
+    }
+    catch (const sinsp_exception& e)
+    {
+        errstr = e.what();
+    }
+    catch (const falco_exception& e)
+    {
+        errstr = e.what();
+    }
+    return nullptr;
 }
 
 // todo(jasondellaluce): this is broken, specially towards value escaping.
 // For now we need to keep resolving lists by text substitution to avoid
 // introducing breaking changes. This is a 1-1 porting of the function
 // we had in Lua.
-bool rule_loader::expand_list_items(std::string& condition)
+bool rule_loader::resolve_list(std::string& condition, rule_list& list)
 {
     static string blanks = " \t\n\r";
     static string delimiters = blanks + "(),=";
     string new_cond;
     size_t start, end;
-    for (auto &list : m_lists)
+
+    start = condition.find(list.name);
+    while (start != string::npos)
     {
-        start = condition.find(list.name);
-        while (start != string::npos)
+        // the characters surrounding the name must be delimiters of beginning/end of string
+        end = start + list.name.length();
+        if ((start == 0 || delimiters.find(condition[start - 1]) != string::npos)
+                && (end >= condition.length() || delimiters.find(condition[end]) != string::npos))
         {
-            // the characters surrounding the name must be delimiters of beginning/end of string
-            end = start + list.name.length();
-            if ((start == 0 || delimiters.find(condition[start - 1]) != string::npos)
-                    && (end >= condition.length() || delimiters.find(condition[end]) != string::npos))
+            // shift pointers to consume all whitespaces
+            while (start > 0 && blanks.find(condition[start - 1]) != string::npos)
             {
-                // shift pointers to consume all whitespaces
-                while (start > 0 && blanks.find(condition[start - 1]) != string::npos)
+                start--;
+            }
+            while (end < condition.length() && blanks.find(condition[end]) != string::npos)
+            {
+                end++;
+            }
+            
+            // create substitution string by concatenating all values
+            string sub = "";
+            for (auto &v : list.values)
+            {
+                if (!sub.empty())
+                {
+                    sub += ", ";
+                }
+                sub += v;
+            }
+
+            // if substituted list is empty, we need to remove a comma from the left or the right
+            if (list.values.empty())
+            {
+                if (start > 0 && condition[start - 1] == ',')
                 {
                     start--;
                 }
-                while (end < condition.length() && blanks.find(condition[end]) != string::npos)
+                else if (end < condition.length() && condition[end] == ',')
                 {
                     end++;
                 }
-                
-                // create substitution string by concatenating all values
-                string sub = "";
-                for (auto &v : list.values)
-                {
-                    if (!sub.empty())
-                    {
-                        sub += ", ";
-                    }
-                    sub += v;
-                }
-
-                // if substituted list is empty, we need to remove a comma from the left or the right
-                if (list.values.empty())
-                {
-                    if (start > 0 && condition[start - 1] == ',')
-                    {
-                        start--;
-                    }
-                    else if (end < condition.length() && condition[end] == ',')
-                    {
-                        end++;
-                    }
-                }
-                
-                // compose new string with substitution
-                new_cond = "";
-                if (start > 0)
-                {
-                    new_cond += condition.substr(0, start);
-                }
-                new_cond += sub;
-                if (end <= condition.length())
-                {
-                    new_cond += condition.substr(end);
-                }
-                condition = new_cond;
-                start += sub.length();
             }
-            start = condition.find(list.name, start + 1);
+            
+            // compose new string with substitution
+            new_cond = "";
+            if (start > 0)
+            {
+                new_cond += condition.substr(0, start);
+            }
+            new_cond += sub;
+            if (end <= condition.length())
+            {
+                new_cond += condition.substr(end);
+            }
+            condition = new_cond;
+            start += sub.length();
         }
+        start = condition.find(list.name, start + 1);
     }
     return true;
 }
@@ -655,7 +877,7 @@ void rule_loader::add_rule(rule& e)
     m_rules.push_back(e);
 }
 
-rule_macro* rule_loader::find_macro(std::string& name)
+rule_macro* rule_loader::find_macro(const std::string& name)
 {
     // todo: decide if we want to optimize linear search (maybe not)
     auto prev = std::find_if(m_macros.begin(), m_macros.end(),
@@ -667,7 +889,7 @@ rule_macro* rule_loader::find_macro(std::string& name)
     return nullptr;
 }
 
-rule_list* rule_loader::find_list(std::string& name)
+rule_list* rule_loader::find_list(const std::string& name)
 {
     // todo: decide if we want to optimize linear search (maybe not)
     auto prev = std::find_if(m_lists.begin(), m_lists.end(),
@@ -679,7 +901,7 @@ rule_list* rule_loader::find_list(std::string& name)
     return nullptr;
 }
 
-rule* rule_loader::find_rule(std::string& name)
+rule* rule_loader::find_rule(const std::string& name)
 {
     // todo: decide if we want to optimize linear search (maybe not)
     auto prev = std::find_if(m_rules.begin(), m_rules.end(),
@@ -689,4 +911,23 @@ rule* rule_loader::find_rule(std::string& name)
         return &*prev;
     }
     return nullptr;
+}
+
+void rule_loader::store_rule_filter(rule& rule, gen_event_filter* filter)
+{
+    // todo: implement this engine->add_filter()
+    if (rule.source == s_syscall_source)
+    {
+        auto evttypes = filter->evttypes();
+        if (evttypes.size() == 0 || evttypes.size() > 100)
+        {
+            add_warning("rule '" + rule.name + "' warning (no-evttype):\n" +
+                    + "         matches too many evt.type values.\n"
+                    + "         This has a significant performance penalty.");
+        }
+    }
+
+    // todo: enable rule in default ruleset engine->enable_rule()
+
+
 }

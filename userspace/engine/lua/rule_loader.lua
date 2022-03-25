@@ -1067,7 +1067,7 @@ function load_rules(rules_content, rules_mgr, verbose, all_events, extra, replac
     -- ordered_rule_{lists,macros,names} to compile them in the order
     -- in which they appeared in the file(s).
     reset_rules(rules_mgr)
-
+    -- DONE 
     for i, name in ipairs(state.ordered_list_names) do
         local v = state.lists_by_name[name]
 
@@ -1103,6 +1103,7 @@ function load_rules(rules_content, rules_mgr, verbose, all_events, extra, replac
         state.macros[v["macro"]] = {["ast"] = ast, ["used"] = false}
     end
 
+    -- DONE
     for _, name in ipairs(state.ordered_rule_names) do
         local v = state.rules_by_name[name]
 

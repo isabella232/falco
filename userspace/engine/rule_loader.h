@@ -28,7 +28,7 @@ limitations under the License.
 struct rule
 {
     uint32_t id;
-    uint32_t id_override;
+    uint32_t id_visibility;
     std::string name;
     std::string description;
     std::string output;
@@ -38,6 +38,7 @@ struct rule
     // todo: exceptions
     falco_common::priority_type priority;
     bool skip_if_unknown_filter;
+    bool warn_evttypes;
     bool enabled;
     bool skipped;
 };
@@ -46,28 +47,39 @@ struct rule
 struct rule_macro
 {
     uint32_t id;
-    uint32_t id_override;
+    uint32_t id_visibility;
     std::string name;
     std::string condition;
     std::string source;
+    std::shared_ptr<libsinsp::filter::ast::expr> condition_ast;
+    bool used;
 };
 
 // todo: better naming & namespace
 struct rule_list
 {
     uint32_t id;
-    uint32_t id_override;
+    uint32_t id_visibility;
     std::string name;
     std::vector<std::string> values;
+    bool used;
 };
 
 class rule_loader
 {
 public:
     void clear();
+
+    // todo: better naming
+    // called for each ruleset file
     bool load(const std::string &rules_content);
+
+    // todo: better naming
+    // called once after all ruleset files are loaded
+    bool compile();
     
     std::vector<std::string>& errors();
+
     std::vector<std::string>& warnings();
 
 private:
@@ -85,19 +97,28 @@ private:
 
     // condition helpers
     std::shared_ptr<libsinsp::filter::ast::expr> parse_condition(
-        std::string condition);
+        std::string condition,
+        std::string& errstr);
+    gen_event_filter* compile_condition(
+        libsinsp::filter::ast::expr* condition,
+        string source,
+        uint32_t rule_id,
+        std::string& errstr);
+    
+    // engine helpers
+    void store_rule_filter(rule& rule, gen_event_filter* filter);
 
     // list helpers
     void quote_item(std::string& item);
-    bool expand_list_items(std::string& condition);
+    bool resolve_list(std::string& condition, rule_list& list);
 
     // state helpers
     void add_macro(rule_macro& e);
     void add_list(rule_list& e);
     void add_rule(rule& e);
-    rule_macro* find_macro(std::string& name);
-    rule_list* find_list(std::string& name);
-    rule* find_rule(std::string& name);
+    rule_macro* find_macro(const std::string& name);
+    rule_list* find_list(const std::string& name);
+    rule* find_rule(const std::string& name);
 
     // state variables
     uint32_t m_last_id;

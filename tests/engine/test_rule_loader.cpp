@@ -29,7 +29,7 @@ TEST_CASE("RULE LOADER EXAMPLE", "[rule_loader]")
 	std::stringstream buffer;
 	buffer << file.rdbuf();
 
-	if (loader.load(buffer.str()))
+	if (loader.load(buffer.str()) && loader.compile())
 	{
 		REQUIRE(true);
 	}
