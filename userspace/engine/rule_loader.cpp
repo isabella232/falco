@@ -23,6 +23,18 @@ using namespace std;
 
 // todo: create only one version of this
 static string s_syscall_source = "syscall";
+static string s_container_info_fmt = "%container.info";
+static string s_container_info_default_extra_fmt = "%container.name (id=%container.id)";
+
+static void string_replace_all(std::string& s, std::string o, std::string n)
+{
+    size_t pos = s.find(o);
+    while(pos != std::string::npos)
+    {
+        s.replace(pos, o.size(), n);
+        pos = s.find(o, pos + n.size());
+    }
+}
 
 // todo: add YAML context too
 void rule_loader::add_error(std::string e)
@@ -113,7 +125,7 @@ bool rule_loader::load(falco_engine* engine, const std::string &rules_content)
     return true;
 }
 
-bool rule_loader::compile(falco_engine* engine)
+bool rule_loader::compile(falco_engine* engine, bool replace_container_info, string fmt_extra)
 {
     string errstr;
     filter_macro_resolver macro_resolver;
@@ -264,7 +276,31 @@ bool rule_loader::compile(falco_engine* engine)
             find_macro(resolved)->used = true;
         }
 
-        // todo: add extra info to rule output (e.g. container.info)
+        // todo(jasondellaluce): simplify the logic here
+        if (r.source == s_syscall_source)
+        {
+            if (r.output.find(s_container_info_fmt) != string::npos)
+            {
+                if (replace_container_info)
+                {
+                    string_replace_all(r.output, s_container_info_fmt, fmt_extra);
+                }
+                else
+                {
+                    string_replace_all(r.output, s_container_info_fmt, s_container_info_default_extra_fmt);
+                    if (!fmt_extra.empty())
+                    {
+                        r.output += " ";
+                        r.output += fmt_extra;
+                    }
+                }
+            }
+            else if (!fmt_extra.empty())
+            {
+                r.output += " ";
+                r.output += fmt_extra;
+            }
+        }
 
         if (!is_format_valid(r.source, r.output, errstr))
         {
@@ -908,7 +944,6 @@ void rule_loader::collect_rule_filter(rule& rule, gen_event_filter* filter)
 // todo: decide what's passed by reference and what not... in all the methods :)
 bool rule_loader::is_format_valid(std::string src, std::string fmt, std::string& errstr)
 {
-    return true; // todo: drop this once everything works
     try
 	{
 		std::shared_ptr<gen_event_formatter> formatter;

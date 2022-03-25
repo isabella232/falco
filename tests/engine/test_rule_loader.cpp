@@ -35,7 +35,7 @@ TEST_CASE("RULE LOADER EXAMPLE", "[rule_loader]")
 	std::shared_ptr<gen_event_formatter_factory> syscall_formatter_factory(new sinsp_evt_formatter_factory(&inspector));
 	engine.add_source("syscall", syscall_filter_factory, syscall_formatter_factory);
 
-	if (loader.load(&engine, buffer.str()) && loader.compile(&engine))
+	if (loader.load(&engine, buffer.str()) && loader.compile(&engine, false, ""))
 	{
 		REQUIRE(true);
 	}

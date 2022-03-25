@@ -77,7 +77,7 @@ public:
 
     // todo: better naming
     // called once after all ruleset files are loaded
-    bool compile(falco_engine* engine);
+    bool compile(falco_engine* engine, bool replace_container_info, string fmt_extra);
     
     std::vector<std::string>& errors();
 
@@ -125,10 +125,12 @@ private:
     uint32_t m_last_id;
     std::vector<std::string> m_errors;
     std::vector<std::string> m_warnings;
-    falco_common::priority_type m_min_priority;
     std::vector<rule_macro> m_macros;
     std::vector<rule_list> m_lists;
     std::vector<rule> m_rules;
     std::map<std::string, std::string> m_required_plugin_versions;
+
+    // used only during method exec
+    falco_common::priority_type m_min_priority;
     falco_engine* m_engine;
 };
