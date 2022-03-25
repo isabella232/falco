@@ -631,7 +631,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
             {
                 string priority;
                 if(!YAML::convert<string>::decode(item["priority"], priority)
-                        || !parse_priority_name(priority, r.priority))
+                        || !falco_common::parse_priority_type(priority, r.priority))
                 {
                     add_error("rule '" + r.name + "' invalid priority");
                     return false;
@@ -685,50 +685,6 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                 }
             }
         }
-    }
-    return true;
-}
-
-// todo: move this in a common place
-bool rule_loader::parse_priority_name(string v, falco_common::priority_type& out)
-{
-    std::transform(v.begin(), v.end(), v.begin(),
-        [](unsigned char c){ return std::tolower(c); });
-    if(v == "emergency")
-    {
-        out = falco_common::priority_type::PRIORITY_EMERGENCY;
-    }
-	else if(v == "alert")
-    {
-        out = falco_common::priority_type::PRIORITY_ALERT;
-    }
-	else if(v == "critical")
-    {
-        out = falco_common::priority_type::PRIORITY_CRITICAL;
-    }
-	else if(v == "error")
-    {
-        out = falco_common::priority_type::PRIORITY_ERROR;
-    }
-	else if(v == "warning")
-    {
-        out = falco_common::priority_type::PRIORITY_WARNING;
-    }
-	else if(v == "notice")
-    {
-        out = falco_common::priority_type::PRIORITY_NOTICE;
-    }
-	else if(v == "info" || v == "informational")
-    {
-        out = falco_common::priority_type::PRIORITY_INFORMATIONAL;
-    }
-	else if(v == "debug")
-    {
-        out = falco_common::priority_type::PRIORITY_DEBUG;
-    }
-    else
-    {
-        return false;
     }
     return true;
 }

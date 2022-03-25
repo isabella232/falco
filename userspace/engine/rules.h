@@ -25,15 +25,12 @@ limitations under the License.
 #include "json_evt.h"
 #include "falco_common.h"
 
-typedef struct lua_State lua_State;
-
 class falco_engine;
 
 class falco_rules
 {
  public:
-	falco_rules(falco_engine *engine,
-		    lua_State *ls);
+	falco_rules(falco_engine *engine);
 	~falco_rules();
 
 	void add_filter_factory(const std::string &source,
@@ -54,27 +51,12 @@ class falco_rules
 
 	bool is_defined_field(const std::string &source, const std::string &field);
 
-	static void init(lua_State *ls);
-	static int clear_filters(lua_State *ls);
-	static int add_filter(lua_State *ls);
-	static int enable_rule(lua_State *ls);
-	static int engine_version(lua_State *ls);
-
-	static int is_source_valid(lua_State *ls);
-
-	// err = falco_rules.is_format_valid(source, format_string)
-	static int is_format_valid(lua_State *ls);
-
-	// err = falco_rules.is_defined_field(source, field)
-	static int is_defined_field(lua_State *ls);
-
  private:
 	void clear_filters();
 	void add_filter(std::shared_ptr<gen_event_filter> filter, string &rule, string &source, std::set<string> &tags);
 	void enable_rule(string &rule, bool enabled);
 
 	falco_engine *m_engine;
-	lua_State* m_ls;
 
 	// Maps from event source to an object that can create rules
 	// for that event source.

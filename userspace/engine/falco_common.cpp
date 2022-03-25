@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2019 The Falco Authors.
+Copyright (C) 2022 The Falco Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,11 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#include <fstream>
-
 #include "falco_common.h"
-#include "banned.h" // This raises a compilation error when certain functions are used
-#include "falco_engine_lua_files.hh"
 
 std::vector<std::string> falco_common::priority_names = {
 	"Emergency",
@@ -28,53 +24,58 @@ std::vector<std::string> falco_common::priority_names = {
 	"Warning",
 	"Notice",
 	"Informational",
-	"Debug"};
+	"Debug"
+};
 
-falco_common::falco_common()
+bool falco_common::parse_priority_type(std::string v, priority_type& out)
 {
-	m_ls = lua_open();
-	if(!m_ls)
-	{
-		throw falco_exception("Cannot open lua");
-	}
-	luaL_openlibs(m_ls);
+	std::transform(v.begin(), v.end(), v.begin(),
+        [](unsigned char c){ return std::tolower(c); });
+    if(v == "emergency")
+    {
+        out = falco_common::priority_type::PRIORITY_EMERGENCY;
+    }
+	else if(v == "alert")
+    {
+        out = falco_common::priority_type::PRIORITY_ALERT;
+    }
+	else if(v == "critical")
+    {
+        out = falco_common::priority_type::PRIORITY_CRITICAL;
+    }
+	else if(v == "error")
+    {
+        out = falco_common::priority_type::PRIORITY_ERROR;
+    }
+	else if(v == "warning")
+    {
+        out = falco_common::priority_type::PRIORITY_WARNING;
+    }
+	else if(v == "notice")
+    {
+        out = falco_common::priority_type::PRIORITY_NOTICE;
+    }
+	else if(v == "info" || v == "informational")
+    {
+        out = falco_common::priority_type::PRIORITY_INFORMATIONAL;
+    }
+	else if(v == "debug")
+    {
+        out = falco_common::priority_type::PRIORITY_DEBUG;
+    }
+    else
+    {
+        return false;
+    }
+    return true;
 }
 
-falco_common::~falco_common()
+bool falco_common::format_priority_type(priority_type v, std::string& out)
 {
-	if(m_ls)
+	if ((size_t) v >= priority_names.size())
 	{
-		lua_close(m_ls);
+		return false;
 	}
-}
-
-void falco_common::init()
-{
-	// Strings in the list lua_module_strings need to be loaded as
-	// lua modules, which also involves adding them to the
-	// package.module table.
-	for(const auto &pair : lua_module_strings)
-	{
-		lua_getglobal(m_ls, "package");
-		lua_getfield(m_ls, -1, "preload");
-
-		if(luaL_loadstring(m_ls, pair.first))
-		{
-			throw falco_exception("Failed to load embedded lua code " +
-					      string(pair.second) + ": " + lua_tostring(m_ls, -1));
-		}
-
-		lua_setfield(m_ls, -2, pair.second);
-	}
-
-	// Strings in the list lua_code_strings need to be loaded and
-	// evaluated so any public functions can be directly called.
-	for(const auto &str : lua_code_strings)
-	{
-		if(luaL_loadstring(m_ls, str) || lua_pcall(m_ls, 0, 0, 0))
-		{
-			throw falco_exception("Failed to load + evaluate embedded lua code " +
-					      string(str) + ": " + lua_tostring(m_ls, -1));
-		}
-	}
+	out = priority_names[(size_t) v];
+	return true;
 }

@@ -40,7 +40,7 @@ limitations under the License.
 // handled in a separate class falco_outputs.
 //
 
-class falco_engine : public falco_common
+class falco_engine
 {
 public:
 	falco_engine(bool seed_rng=true);

@@ -28,17 +28,9 @@ limitations under the License.
 
 #include "formats.h"
 
-#include "lua_filter_helper.h"
-extern "C" {
-#include "lyaml.h"
-}
-
 #include "utils.h"
 #include "banned.h" // This raises a compilation error when certain functions are used
 
-
-string lua_on_event = "on_event";
-string lua_print_stats = "print_stats";
 const std::string falco_engine::s_default_ruleset = "falco-default-ruleset";
 
 using namespace std;
@@ -49,12 +41,6 @@ falco_engine::falco_engine(bool seed_rng)
 	  m_sampling_ratio(1), m_sampling_multiplier(0),
 	  m_replace_container_info(false)
 {
-	luaopen_yaml(m_ls);
-
-	falco_common::init();
-	falco_rules::init(m_ls);
-	lua_filter_helper::init(m_ls);
-
 	m_required_plugin_versions.clear();
 
 	if(seed_rng)
@@ -164,9 +150,7 @@ void falco_engine::load_rules(const string &rules_content, bool verbose, bool al
 {
 	if(!m_rules)
 	{
-		m_rules.reset(new falco_rules(this,
-					      m_ls));
-
+		m_rules.reset(new falco_rules(this));
 		for(auto const &it : m_filter_factories)
 		{
 			m_rules->add_filter_factory(it.first, it.second);
@@ -339,77 +323,77 @@ void falco_engine::add_source(const std::string &source,
 
 void falco_engine::populate_rule_result(unique_ptr<struct rule_result> &res, gen_event *ev)
 {
-	std::lock_guard<std::mutex> guard(m_ls_semaphore);
-	lua_getglobal(m_ls, lua_on_event.c_str());
-	if(lua_isfunction(m_ls, -1))
-	{
-		lua_pushnumber(m_ls, ev->get_check_id());
-		if(lua_pcall(m_ls, 1, 5, 0) != 0)
-		{
-			const char* lerr = lua_tostring(m_ls, -1);
-			string err = "Error invoking function output: " + string(lerr);
-			throw falco_exception(err);
-		}
-		const char *p =  lua_tostring(m_ls, -5);
-		res->rule = p;
-		res->evt = ev;
-		res->priority_num = (falco_common::priority_type) lua_tonumber(m_ls, -4);
-		res->format = lua_tostring(m_ls, -3);
+	// std::lock_guard<std::mutex> guard(m_ls_semaphore);
+	// lua_getglobal(m_ls, lua_on_event.c_str());
+	// if(lua_isfunction(m_ls, -1))
+	// {
+	// 	lua_pushnumber(m_ls, ev->get_check_id());
+	// 	if(lua_pcall(m_ls, 1, 5, 0) != 0)
+	// 	{
+	// 		const char* lerr = lua_tostring(m_ls, -1);
+	// 		string err = "Error invoking function output: " + string(lerr);
+	// 		throw falco_exception(err);
+	// 	}
+	// 	const char *p =  lua_tostring(m_ls, -5);
+	// 	res->rule = p;
+	// 	res->evt = ev;
+	// 	res->priority_num = (falco_common::priority_type) lua_tonumber(m_ls, -4);
+	// 	res->format = lua_tostring(m_ls, -3);
 
-		// Tags are passed back as a table, and is on the top of the stack
-		lua_pushnil(m_ls);  /* first key */
-		while (lua_next(m_ls, -2) != 0) {
-			// key is at index -2, value is at index
-			// -1. We want the value.
-			res->tags.insert(luaL_checkstring(m_ls, -1));
+	// 	// Tags are passed back as a table, and is on the top of the stack
+	// 	lua_pushnil(m_ls);  /* first key */
+	// 	while (lua_next(m_ls, -2) != 0) {
+	// 		// key is at index -2, value is at index
+	// 		// -1. We want the value.
+	// 		res->tags.insert(luaL_checkstring(m_ls, -1));
 
-			// Remove value, keep key for next iteration
-			lua_pop(m_ls, 1);
-		}
-		lua_pop(m_ls, 1); // Clean table leftover
+	// 		// Remove value, keep key for next iteration
+	// 		lua_pop(m_ls, 1);
+	// 	}
+	// 	lua_pop(m_ls, 1); // Clean table leftover
 
-		// Exception fields are passed back as a table
-		lua_pushnil(m_ls);  /* first key */
-		while (lua_next(m_ls, -2) != 0) {
-			// key is at index -2, value is at index
-			// -1. We want the keys.
-			res->exception_fields.insert(luaL_checkstring(m_ls, -2));
+	// 	// Exception fields are passed back as a table
+	// 	lua_pushnil(m_ls);  /* first key */
+	// 	while (lua_next(m_ls, -2) != 0) {
+	// 		// key is at index -2, value is at index
+	// 		// -1. We want the keys.
+	// 		res->exception_fields.insert(luaL_checkstring(m_ls, -2));
 
-			// Remove value, keep key for next iteration
-			lua_pop(m_ls, 1);
-		}
+	// 		// Remove value, keep key for next iteration
+	// 		lua_pop(m_ls, 1);
+	// 	}
 
-		lua_pop(m_ls, 4);
-	}
-	else
-	{
-		throw falco_exception("No function " + lua_on_event + " found in lua compiler module");
-	}
+	// 	lua_pop(m_ls, 4);
+	// }
+	// else
+	// {
+	// 	throw falco_exception("No function " + lua_on_event + " found in lua compiler module");
+	// }
 }
 
 void falco_engine::describe_rule(string *rule)
 {
-	return m_rules->describe_rule(rule);
+	// return m_rules->describe_rule(rule);
 }
 
 // Print statistics on the rules that triggered
 void falco_engine::print_stats()
 {
-	lua_getglobal(m_ls, lua_print_stats.c_str());
+	// lua_getglobal(m_ls, lua_print_stats.c_str());
 
-	if(lua_isfunction(m_ls, -1))
-	{
-		if(lua_pcall(m_ls, 0, 0, 0) != 0)
-		{
-			const char* lerr = lua_tostring(m_ls, -1);
-			string err = "Error invoking function print_stats: " + string(lerr);
-			throw falco_exception(err);
-		}
-	}
-	else
-	{
-		throw falco_exception("No function " + lua_print_stats + " found in lua rule loader module");
-	}
+	// if(lua_isfunction(m_ls, -1))
+	// {
+	// 	if(lua_pcall(m_ls, 0, 0, 0) != 0)
+	// 	{
+	// 		const char* lerr = lua_tostring(m_ls, -1);
+	// 		string err = "Error invoking function print_stats: " + string(lerr);
+	// 		throw falco_exception(err);
+	// 	}
+	// }
+	// else
+	// {
+	// 	throw falco_exception("No function " + lua_print_stats + " found in lua rule loader module");
+	// }
 
 }
 

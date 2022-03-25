@@ -93,7 +93,6 @@ private:
     bool parse_macro(bool& parsed, const YAML::Node& item);
     bool parse_list(bool& parsed, const YAML::Node& item);
     bool parse_rule(bool& parsed, const YAML::Node& item);
-    bool parse_priority_name(std::string v, falco_common::priority_type& out);
 
     // condition helpers
     std::shared_ptr<libsinsp::filter::ast::expr> parse_condition(
