@@ -28,6 +28,7 @@ limitations under the License.
 struct rule
 {
     uint32_t id;
+    uint32_t id_override;
     std::string name;
     std::string description;
     std::string output;
@@ -45,6 +46,7 @@ struct rule
 struct rule_macro
 {
     uint32_t id;
+    uint32_t id_override;
     std::string name;
     std::string condition;
     std::string source;
@@ -54,6 +56,7 @@ struct rule_macro
 struct rule_list
 {
     uint32_t id;
+    uint32_t id_override;
     std::string name;
     std::vector<std::string> values;
 };

@@ -200,15 +200,22 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
             return true;
         }
 
+        auto prev = find_macro(m.name);
+        if (prev && prev->source != m.source)
+        {
+            add_error("macro '" + m.name + "' redefined with another source");
+            return false;
+        }
+
         bool append = false;
         if(item["append"].IsDefined()
                 && !YAML::convert<bool>::decode(item["append"], append))
         {
             // todo: print a warning failed decoding of 'append'
         }
+
         if (append)
         {
-            auto prev = find_macro(m.name);
             if (!prev)
             {
                 add_error("macro '" + m.name 
@@ -218,15 +225,23 @@ bool rule_loader::parse_macro(bool& parsed, const YAML::Node& item)
             // todo(jasondellaluce): consider doing AST concatenation in the future
             prev->condition += " ";
             prev->condition += m.condition;
-            prev->id = m_last_id++; // todo: not sure of this, it may break the ordering semantics
+            prev->id_override = m_last_id++;
             // todo: concatenate YAML context too
-            // todo: should we parse AST here and resolve macros seen so far?
         }
         else
         {
-            // todo: should we parse AST here and resolve macros seen so far?
-            m.id = m_last_id++;
-            add_macro(m);
+            // store macro
+            if (prev)
+            {
+                prev->condition = m.condition;
+                prev->id_override = m_last_id++;
+            }
+            else
+            {
+                m.id = m_last_id++;
+                m.id_override = m.id;
+                add_macro(m);
+            }
         }
     }
     return true;
@@ -267,12 +282,11 @@ bool rule_loader::parse_list(bool& parsed, const YAML::Node& item)
         {
             // todo: print a warning failed decoding of 'append'
         }
+
+        auto prev = find_list(l.name);
         if (append)
         {
-            // todo: decide if we want to optimize linear search (maybe not)
-            auto prev = std::find_if(m_lists.begin(), m_lists.end(),
-		        [&l](const rule_list &e) { return e.name == l.name; });
-            if (prev == m_lists.end())
+            if (!prev)
             {
                 add_error("list '" + l.name 
                     + "' has 'append' key but no list by that name already exists");
@@ -280,15 +294,23 @@ bool rule_loader::parse_list(bool& parsed, const YAML::Node& item)
             }
             // todo(jasondellaluce): consider doing AST concatenation in the future
             prev->values.insert(prev->values.end(), l.values.begin(), l.values.end());
-            prev->id = m_last_id++; // todo: not sure of this, it may break the ordering semantics
+            prev->id_override = m_last_id++;
             // todo: concatenate YAML context too
-            // todo: should we resolve existing lists here?
         }
         else
         {
-            // todo: should we resolve existing lists here?
-            l.id = m_last_id++;
-            add_list(l);
+            // store list
+            if (prev)
+            {
+                prev->id_override = m_last_id++;
+                prev->values = l.values;
+            }
+            else
+            {
+                l.id = m_last_id++;
+                l.id_override = l.id;
+                add_list(l);
+            }
         }
 
     }
@@ -307,10 +329,6 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
             add_error("rule name is empty");
             return false;
         }
-
-        // todo: decide if we want to optimize linear search (maybe not)
-        auto prev = std::find_if(m_rules.begin(), m_rules.end(),
-		        [&r](const rule &e) { return e.name == r.name; });
 
         r.skip_if_unknown_filter = false;
         if(item["skip-if-unknown-filter"].IsDefined()
@@ -334,6 +352,13 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
             return true;
         }
 
+        auto prev = find_rule(r.name);
+        if (prev && prev->source != r.source)
+        {
+            add_error("rule '" + r.name + "' redefined with another source");
+            return false;
+        }
+
         bool append = false;
         if(item["append"].IsDefined()
                 && !YAML::convert<bool>::decode(item["append"], append))
@@ -348,7 +373,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
 
         if (append)
         {
-            if (prev == m_rules.end())
+            if (!prev)
             {
                 add_error("rule '" + r.name 
                     + "' has 'append' key but no rule by that name already exists");
@@ -371,7 +396,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                 prev->condition += r.condition;
             }
 
-            prev->id = m_last_id++; // todo: not sure
+            prev->id_override = m_last_id++;
             // todo: concatenate context too
         }
         else
@@ -390,7 +415,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                         + "' is missing one of 'condition', 'output', 'desc', or 'priority'");
                     return false;
                 }
-                if (prev == m_rules.end())
+                if (!prev)
                 {
                     add_error("rule '" + r.name 
                         + "' has 'enabled' key but no rule by that name already exists");
@@ -420,6 +445,7 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                 {
                     // todo: print a warning failed decoding
                 }
+                // todo: trim output
                 if(!YAML::convert<string>::decode(item["output"], r.output))
                 {
                     // todo: print a warning failed decoding
@@ -443,16 +469,19 @@ bool rule_loader::parse_rule(bool& parsed, const YAML::Node& item)
                     }
                 }
 
-                r.id = m_last_id++; // todo: i'm really not sure of this
-                if (prev == m_rules.end())
+                // store rule
+                if (prev)
                 {
-                    // rule has been defined for the first time
-                    add_rule(r);
+                    auto prev_id = prev->id;
+                    r.id = prev->id;
+                    r.id_override = m_last_id++;
+                    *prev = r;
                 }
                 else
                 {
-                    // rule has been overwritten
-                    *prev = r;
+                    r.id = m_last_id++;
+                    r.id_override = r.id;
+                    add_rule(r);
                 }
             }
         }
